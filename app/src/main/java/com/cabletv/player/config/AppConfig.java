@@ -36,7 +36,7 @@ public class AppConfig {
 
     // Web Server
     public static boolean isWebServerEnabled() {
-        return Hawk.get(WEB_SERVER_ENABLED_KEY, false);
+        return Hawk.get(WEB_SERVER_ENABLED_KEY, true);  // Default: enabled for first launch
     }
 
     public static void setWebServerEnabled(boolean enabled) {

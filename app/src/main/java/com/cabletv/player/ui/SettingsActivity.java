@@ -12,6 +12,7 @@ import android.widget.Toast;
 
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
+import com.cabletv.player.server.ConfigWebServer;
 
 public class SettingsActivity extends Activity {
     private EditText mM3uUrlInput;
@@ -62,12 +63,14 @@ public class SettingsActivity extends Activity {
 
     private void handleWebServerToggle(boolean enabled) {
         AppConfig.setWebServerEnabled(enabled);
-        updateWebServerAddress();
         if (enabled) {
-            Toast.makeText(this, "Web server enabled", Toast.LENGTH_SHORT).show();
+            ConfigWebServer.startServer(this);
+            Toast.makeText(this, "Web server started", Toast.LENGTH_SHORT).show();
         } else {
-            Toast.makeText(this, "Web server disabled", Toast.LENGTH_SHORT).show();
+            ConfigWebServer.stopServer();
+            Toast.makeText(this, "Web server stopped", Toast.LENGTH_SHORT).show();
         }
+        updateWebServerAddress();
     }
 
     private void updateWebServerAddress() {

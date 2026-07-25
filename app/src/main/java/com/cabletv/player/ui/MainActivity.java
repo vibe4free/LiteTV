@@ -14,6 +14,7 @@ import com.cabletv.player.config.ChannelRepository;
 import com.cabletv.player.config.KeyMapping;
 import com.cabletv.player.model.Channel;
 import com.cabletv.player.epg.EpgManager;
+import com.cabletv.player.server.ConfigWebServer;
 import xyz.doikki.videoplayer.player.VideoView;
 
 public class MainActivity extends Activity {
@@ -79,6 +80,11 @@ public class MainActivity extends Activity {
 
         // Set up audio manager for volume control
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
+
+        // Start web server for remote configuration
+        if (AppConfig.isWebServerEnabled()) {
+            ConfigWebServer.startServer(this);
+        }
     }
 
     @Override
@@ -256,6 +262,7 @@ public class MainActivity extends Activity {
         if (mVideoView != null) {
             mVideoView.release();
         }
+        ConfigWebServer.stopServer();
     }
 
     private int dp2px(int dp) {
