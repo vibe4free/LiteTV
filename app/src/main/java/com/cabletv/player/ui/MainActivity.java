@@ -182,18 +182,22 @@ public class MainActivity extends Activity {
 
     private void showChannelList() {
         if (mChannelListComponent == null) {
-            FrameLayout rootView = (FrameLayout) getWindow().getDecorView().findViewById(android.R.id.content).getParent();
-            if (rootView == null) {
-                rootView = (FrameLayout) mVideoView.getParent();
+            android.view.ViewGroup rootView = null;
+            android.view.View contentView = findViewById(android.R.id.content);
+            if (contentView != null && contentView.getParent() instanceof android.view.ViewGroup) {
+                rootView = (android.view.ViewGroup) contentView.getParent();
             }
-            if (rootView != null) {
+            if (rootView == null && mVideoView.getParent() instanceof android.view.ViewGroup) {
+                rootView = (android.view.ViewGroup) mVideoView.getParent();
+            }
+            if (rootView != null && rootView instanceof FrameLayout) {
                 mChannelListComponent = new ChannelListComponent(
                         this, mChannelRepository.getAllChannels());
                 FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                         dp2px(240), FrameLayout.LayoutParams.MATCH_PARENT);
                 lp.gravity = android.view.Gravity.START;
                 mChannelListComponent.setLayoutParams(lp);
-                rootView.addView(mChannelListComponent);
+                ((FrameLayout) rootView).addView(mChannelListComponent);
                 mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
             }
         }
