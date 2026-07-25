@@ -58,18 +58,23 @@ public class MainActivity extends Activity {
         rootView.addView(mSwitchOverlay);
 
         // Setup channel change listener
-        mChannelRepository.addListener(channels -> {
-            Log.i(TAG, "Channels updated: " + channels.size());
-            if (mChannelListComponent != null) {
-                mChannelListComponent.updateChannels(
-                        mChannelRepository.getAllChannels(), mCurrentChannelIndex);
+        mChannelRepository.addListener(new ChannelRepository.OnChannelsChangedListener() {
+            @Override
+            public void onChannelsChanged(java.util.List<com.cabletv.player.model.ChannelGroup> channels) {
+                Log.i(TAG, "Channels updated: " + channels.size());
+                if (mChannelListComponent != null) {
+                    mChannelListComponent.updateChannels(
+                            mChannelRepository.getAllChannels(), mCurrentChannelIndex);
+                }
+                // Reset to first channel when playlist updates
+                mCurrentChannelIndex = 0;
+                playChannel(mCurrentChannelIndex);
             }
-            // Reset to first channel when playlist updates
-            mCurrentChannelIndex = 0;
-            playChannel(mCurrentChannelIndex);
         });
 
-        // Load channels from configured source
+        // Load channels from configured source or use test URL if none configured
+        String m3uUrl = AppConfig.getM3uUrl();
+
         mChannelRepository.reload();
 
         // Set up audio manager for volume control
@@ -214,13 +219,18 @@ public class MainActivity extends Activity {
         Channel channel = mChannelRepository.getChannel(index);
         if (channel != null) {
             Log.d(TAG, "Playing channel: " + channel.name + " - " + channel.url);
-            mSwitchOverlay.showChannelSwitch(channel);
-            mVideoView.switchUrl(channel.url, channel.headers);
-            mVideoView.start();
+            // Ensure UI operations happen on main thread
+            runOnUiThread(() -> {
+                if (mSwitchOverlay != null) {
+                    mSwitchOverlay.showChannelSwitch(channel);
+                }
+                mVideoView.switchUrl(channel.url, channel.headers);
+                mVideoView.start();
+                if (mChannelListComponent != null) {
+                    mChannelListComponent.setCurrentChannel(index);
+                }
+            });
             mEpgManager.loadEpg(channel);
-            if (mChannelListComponent != null) {
-                mChannelListComponent.setCurrentChannel(index);
-            }
         }
     }
 

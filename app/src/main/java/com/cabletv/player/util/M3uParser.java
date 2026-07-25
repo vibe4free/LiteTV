@@ -76,9 +76,11 @@ public class M3uParser {
 
                 if (isValidUrl(line) && pendingChannel != null) {
                     pendingChannel.url = line;
-                    ChannelGroup group = groupMap.computeIfAbsent(
-                            pendingChannel.group,
-                            k -> new ChannelGroup(k));
+                    ChannelGroup group = groupMap.get(pendingChannel.group);
+                    if (group == null) {
+                        group = new ChannelGroup(pendingChannel.group);
+                        groupMap.put(pendingChannel.group, group);
+                    }
                     group.addChannel(pendingChannel);
                     pendingChannel = null;
                 }
@@ -118,9 +120,11 @@ public class M3uParser {
                     if (isValidUrl(url)) {
                         Channel channel = new Channel(channelName, url);
                         channel.group = currentGroupName;
-                        ChannelGroup group = groupMap.computeIfAbsent(
-                                currentGroupName,
-                                k -> new ChannelGroup(k));
+                        ChannelGroup group = groupMap.get(currentGroupName);
+                        if (group == null) {
+                            group = new ChannelGroup(currentGroupName);
+                            groupMap.put(currentGroupName, group);
+                        }
                         group.addChannel(channel);
                         break;
                     }
