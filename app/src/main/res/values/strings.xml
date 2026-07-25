@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CableTV Player</string>
+    <string name="channel_list">Channel List</string>
+    <string name="settings">Settings</string>
+    <string name="web_server">Web Server</string>
+    <string name="play_source">Play Source</string>
+    <string name="epg_source">EPG Source</string>
+    <string name="key_mapping">Key Mapping</string>
+    <string name="m3u_url">M3U URL</string>
+    <string name="epg_url">EPG URL</string>
+    <string name="web_server_enabled">Web Server Enabled</string>
+    <string name="server_address">Server Address</string>
+    <string name="upload_m3u">Upload M3U File</string>
+    <string name="channel_up">Channel Up</string>
+    <string name="channel_down">Channel Down</string>
+    <string name="volume_up">Volume Up</string>
+    <string name="volume_down">Volume Down</string>
+    <string name="ok">OK</string>
+    <string name="menu">Menu</string>
+    <string name="back">Back</string>
+    <string name="rebind">Rebind</string>
+    <string name="waiting_key">Waiting for key...</string>
+</resources>
