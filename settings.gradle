@@ -1,0 +1,3 @@
+rootProject.name = "CableTV Player"
+include ':app'
+include ':player'
