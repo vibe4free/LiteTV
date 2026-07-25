@@ -1,5 +1,6 @@
 package com.cabletv.player.ui;
 
+import android.app.Activity;
 import android.content.Context;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -9,12 +10,10 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.appcompat.app.AppCompatActivity;
-
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
 
-public class SettingsActivity extends AppCompatActivity {
+public class SettingsActivity extends Activity {
     private EditText mM3uUrlInput;
     private EditText mEpgUrlInput;
     private CheckBox mWebServerToggle;

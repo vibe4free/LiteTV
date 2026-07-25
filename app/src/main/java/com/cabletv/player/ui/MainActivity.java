@@ -1,13 +1,12 @@
 package com.cabletv.player.ui;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.media.AudioManager;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.widget.FrameLayout;
-
-import androidx.appcompat.app.AppCompatActivity;
 
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
@@ -17,7 +16,7 @@ import com.cabletv.player.model.Channel;
 import com.cabletv.player.epg.EpgManager;
 import xyz.doikki.videoplayer.player.VideoView;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
 
     private VideoView mVideoView;
