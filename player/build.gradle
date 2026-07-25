@@ -3,6 +3,7 @@ plugins {
 }
 
 android {
+    namespace = "com.github.tvbox.osc.player"
     compileSdk 34
 
     defaultConfig {
