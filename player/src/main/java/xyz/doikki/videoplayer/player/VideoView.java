@@ -694,7 +694,7 @@ public class VideoView<P extends AbstractPlayer> extends FrameLayout
      * @param headers 请求头
      */
     public void switchUrl(String url, Map<String, String> headers) {
-        if (mMediaPlayer != null && getCurrentState() != STATE_IDLE && getCurrentState() != STATE_ERROR) {
+        if (mMediaPlayer != null && mCurrentPlayState != STATE_IDLE && mCurrentPlayState != STATE_ERROR) {
             // Player is in a reusable state, attempt seamless switch
             mMediaPlayer.switchDataSource(url, headers);
         } else {
