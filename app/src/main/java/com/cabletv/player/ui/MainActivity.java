@@ -16,6 +16,7 @@ import com.cabletv.player.model.Channel;
 import com.cabletv.player.epg.EpgManager;
 import com.cabletv.player.server.ConfigWebServer;
 import xyz.doikki.videoplayer.player.VideoView;
+import xyz.doikki.videoplayer.exo.ExoMediaPlayerFactory;
 
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
@@ -36,6 +37,8 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         mVideoView = findViewById(R.id.video_view);
+        // Configure VideoView to use ExoPlayer instead of default Android MediaPlayer
+        mVideoView.setPlayerFactory(new ExoMediaPlayerFactory());
         mChannelRepository = new ChannelRepository(this);
         mEpgManager = new EpgManager(this);
 
@@ -93,10 +96,13 @@ public class MainActivity extends Activity {
             return super.dispatchKeyEvent(event);
         }
 
+        Log.d(TAG, "Key pressed: " + event.getKeyCode() + " (" + KeyEvent.keyCodeToString(event.getKeyCode()) + ")");
         KeyMapping.Action action = KeyMapping.resolve(event.getKeyCode());
         if (action == null) {
+            Log.d(TAG, "No action mapped for keycode: " + event.getKeyCode());
             return super.dispatchKeyEvent(event);
         }
+        Log.d(TAG, "Action: " + action);
 
         switch (action) {
             case CHANNEL_UP:
@@ -172,7 +178,9 @@ public class MainActivity extends Activity {
     }
 
     private void handleOk() {
+        Log.d(TAG, "handleOk called, mChannelListVisible=" + mChannelListVisible);
         mChannelListVisible = !mChannelListVisible;
+        Log.d(TAG, "After toggle, mChannelListVisible=" + mChannelListVisible);
         if (mChannelListVisible) {
             showChannelList();
         } else {
@@ -182,27 +190,30 @@ public class MainActivity extends Activity {
 
     private void showChannelList() {
         if (mChannelListComponent == null) {
-            android.view.ViewGroup rootView = null;
-            android.view.View contentView = findViewById(android.R.id.content);
-            if (contentView != null && contentView.getParent() instanceof android.view.ViewGroup) {
-                rootView = (android.view.ViewGroup) contentView.getParent();
+            mChannelListComponent = new ChannelListComponent(
+                    this, mChannelRepository.getAllChannels());
+            mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
+
+            // Add to VideoView's parent or create appropriate params
+            if (mVideoView.getParent() instanceof android.view.ViewGroup) {
+                android.view.ViewGroup parent = (android.view.ViewGroup) mVideoView.getParent();
+                if (parent instanceof FrameLayout) {
+                    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                            dp2px(240), FrameLayout.LayoutParams.MATCH_PARENT);
+                    lp.gravity = android.view.Gravity.START;
+                    mChannelListComponent.setLayoutParams(lp);
+                } else {
+                    android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
+                            dp2px(240), android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
+                    mChannelListComponent.setLayoutParams(lp);
+                }
+                parent.addView(mChannelListComponent);
             }
-            if (rootView == null && mVideoView.getParent() instanceof android.view.ViewGroup) {
-                rootView = (android.view.ViewGroup) mVideoView.getParent();
-            }
-            if (rootView != null && rootView instanceof FrameLayout) {
-                mChannelListComponent = new ChannelListComponent(
-                        this, mChannelRepository.getAllChannels());
-                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                        dp2px(240), FrameLayout.LayoutParams.MATCH_PARENT);
-                lp.gravity = android.view.Gravity.START;
-                mChannelListComponent.setLayoutParams(lp);
-                ((FrameLayout) rootView).addView(mChannelListComponent);
-                mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
-            }
+            Log.d(TAG, "ChannelListComponent created and added");
         }
         if (mChannelListComponent != null) {
             mChannelListComponent.setVisibility(android.view.View.VISIBLE);
+            Log.d(TAG, "ChannelListComponent set to VISIBLE");
         }
     }
 
