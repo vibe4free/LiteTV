@@ -230,7 +230,7 @@ public class ConfigWebServer {
                 "<head>\n" +
                 "    <meta charset=\"UTF-8\">\n" +
                 "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
-                "    <title>CableTV Player 配置</title>\n" +
+                "    <title>LiteTV 配置</title>\n" +
                 "    <style>\n" +
                 "        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; margin: 0; padding: 20px; }\n" +
                 "        .container { max-width: 700px; margin: 0 auto; }\n" +
@@ -250,7 +250,7 @@ public class ConfigWebServer {
                 "</head>\n" +
                 "<body>\n" +
                 "    <div class=\"container\">\n" +
-                "        <h1>📺 CableTV Player 配置</h1>\n" +
+                "        <h1>📺 LiteTV 配置</h1>\n" +
                 "        \n" +
                 "        <div class=\"section\">\n" +
                 "            <h2>M3U 播放列表</h2>\n" +
