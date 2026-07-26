@@ -5,6 +5,10 @@ import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.model.Channel;
+import com.google.gson.JsonParser;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -54,13 +58,83 @@ public class EpgManager {
 
                 String content = fetchUrl(url);
                 if (content != null && !content.isEmpty()) {
-                    // Parse EPG content (simplified for now - just log success)
+                    Log.d(TAG, "EPG response length: " + content.length() + ", first 200 chars: " + content.substring(0, Math.min(200, content.length())));
+                    parseEpgContent(channel, content);
                     Log.d(TAG, "EPG loaded for channel: " + channel.name);
                 }
             } catch (Exception e) {
                 Log.w(TAG, "Error loading EPG for " + channel.name, e);
             }
         }).start();
+    }
+
+    private void parseEpgContent(Channel channel, String content) {
+        try {
+            if (content.contains("[") || content.contains("{")) {
+                parseJsonEpg(channel, content);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing EPG for " + channel.name, e);
+        }
+    }
+
+    private void parseJsonEpg(Channel channel, String json) {
+        try {
+            JsonElement element = JsonParser.parseString(json);
+            Log.d(TAG, "Parsing EPG JSON for " + channel.name + ", isArray=" + element.isJsonArray() + ", isObject=" + element.isJsonObject());
+
+            if (element.isJsonArray()) {
+                JsonArray programs = element.getAsJsonArray();
+                Log.d(TAG, "EPG array size: " + programs.size());
+                parseArray(channel, programs);
+            } else if (element.isJsonObject()) {
+                Log.d(TAG, "EPG is JsonObject, checking for epg_data field");
+                JsonObject obj = element.getAsJsonObject();
+                if (obj.has("epg_data") && obj.get("epg_data").isJsonArray()) {
+                    JsonArray programs = obj.getAsJsonArray("epg_data");
+                    Log.d(TAG, "Found epg_data array with size: " + programs.size());
+                    parseArray(channel, programs);
+                } else if (obj.has("data") && obj.get("data").isJsonArray()) {
+                    JsonArray programs = obj.getAsJsonArray("data");
+                    Log.d(TAG, "Found data array with size: " + programs.size());
+                    parseArray(channel, programs);
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Failed to parse EPG JSON: " + e.getMessage());
+        }
+    }
+
+    private void parseArray(Channel channel, JsonArray programs) {
+        for (int i = 0; i < Math.min(programs.size(), 5); i++) {
+            try {
+                JsonObject prog = programs.get(i).getAsJsonObject();
+                String title = null;
+                long currentTime = System.currentTimeMillis();
+
+                // Try different field names for program title
+                if (prog.has("节目名")) {
+                    title = prog.get("节目名").getAsString();
+                } else if (prog.has("name")) {
+                    title = prog.get("name").getAsString();
+                } else if (prog.has("title")) {
+                    title = prog.get("title").getAsString();
+                } else if (i == 0) {
+                    Log.d(TAG, "EPG object keys: " + prog.keySet());
+                }
+
+                if (title != null && !title.isEmpty()) {
+                    Program program = new Program(title, 0, 0);
+                    // Only store as current if it's the first item (simplification)
+                    if (i == 0) {
+                        mPrograms.put(channel.tvgId, program);
+                        Log.d(TAG, "EPG program stored for " + channel.name + ": " + title);
+                    }
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "Error parsing program " + i + ": " + e.getMessage());
+            }
+        }
     }
 
     public Program getCurrentProgram(Channel channel) {
@@ -79,7 +153,6 @@ public class EpgManager {
     }
 
     public String getNextProgramInfo(Channel channel) {
-        // TODO: Implement next program lookup from EPG cache
         return null;
     }
 

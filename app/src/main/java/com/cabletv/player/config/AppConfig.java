@@ -11,6 +11,7 @@ public class AppConfig {
     private static final String WEB_SERVER_PORT_KEY = "app_web_server_port";
     private static final String SIDEBAR_ALPHA_KEY = "app_sidebar_alpha";
     private static final String M3U_FILE_PATH_KEY = "app_m3u_file_path";
+    private static final String EPG_DISPLAY_KEY = "app_epg_display_enabled";
 
     private static final String DEFAULT_EPG_URL = "";
     private static final int DEFAULT_WEB_SERVER_PORT = 8899;
@@ -67,5 +68,14 @@ public class AppConfig {
 
     public static void setM3uFilePath(String path) {
         Hawk.put(M3U_FILE_PATH_KEY, path);
+    }
+
+    // EPG Display toggle
+    public static boolean isEpgDisplayEnabled() {
+        return Hawk.get(EPG_DISPLAY_KEY, true);  // Default: enabled
+    }
+
+    public static void setEpgDisplayEnabled(boolean enabled) {
+        Hawk.put(EPG_DISPLAY_KEY, enabled);
     }
 }

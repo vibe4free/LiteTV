@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.epg.EpgManager;
 import com.cabletv.player.model.Channel;
+import android.util.Log;
 import xyz.doikki.videoplayer.controller.ControlWrapper;
 import xyz.doikki.videoplayer.controller.IControlComponent;
 
@@ -193,6 +194,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         }
 
         public void setSelectedChannel(int oldIndex, int newIndex) {
+            mSelectedIndex = newIndex;
             notifyItemChanged(oldIndex);
             notifyItemChanged(newIndex);
         }
@@ -266,9 +268,17 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                     container.setBackgroundColor(0x00000000);
                 }
 
-                if (epgManager != null) {
+                // Show EPG info if enabled
+                if (AppConfig.isEpgDisplayEnabled() && epgManager != null) {
                     String epgInfo = epgManager.getCurrentProgramInfo(channel);
-                    epgView.setText(epgInfo != null ? epgInfo : "No EPG");
+                    if (epgInfo != null && !epgInfo.isEmpty()) {
+                        epgView.setText(epgInfo);
+                        epgView.setVisibility(android.view.View.VISIBLE);
+                    } else {
+                        epgView.setVisibility(android.view.View.GONE);
+                    }
+                } else {
+                    epgView.setVisibility(android.view.View.GONE);
                 }
             }
 

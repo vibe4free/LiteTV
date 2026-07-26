@@ -149,8 +149,10 @@ public class MainActivity extends Activity {
             // When channel list is visible, select previous channel
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
+            Log.d(TAG, "Channel UP - list visible, current selected=" + selected + ", count=" + count);
             if (count > 0) {
                 selected = (selected + 1) % count;
+                Log.d(TAG, "Channel UP - new selected=" + selected);
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
@@ -174,8 +176,10 @@ public class MainActivity extends Activity {
             // When channel list is visible, select next channel
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
+            Log.d(TAG, "Channel DOWN - list visible, current selected=" + selected + ", count=" + count);
             if (count > 0) {
                 selected = (selected - 1 + count) % count;
+                Log.d(TAG, "Channel DOWN - new selected=" + selected);
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
@@ -207,6 +211,7 @@ public class MainActivity extends Activity {
     }
 
     private void handleOk() {
+        Log.d(TAG, "handleOk called, mChannelListVisible=" + mChannelListVisible);
         if (mChannelListVisible) {
             // Confirm channel selection and switch
             if (mChannelListComponent != null) {
@@ -214,10 +219,12 @@ public class MainActivity extends Activity {
             }
             hideChannelList();
             mChannelListVisible = false;
+            Log.d(TAG, "handleOk - hiding list");
         } else {
             // Show channel list for selection
             mChannelListVisible = true;
             showChannelList();
+            Log.d(TAG, "handleOk - showing list, mChannelListVisible now=" + mChannelListVisible);
         }
     }
 
