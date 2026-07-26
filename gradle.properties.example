@@ -1,28 +1,28 @@
 # Release Signing Configuration (本地配置模板)
 #
-# 复制本文件为 gradle.properties，然后填入实际的签名信息
-# 该文件应该在本地保留，不要提交到 git
+# 复制本文件为 gradle.properties，然后填入实际的签名信息。
+# gradle.properties 已被 .gitignore 忽略，请勿提交；本模板中不得写入真实口令。
 #
-# 创建方式：
+# 创建签名库：
 # keytool -genkey -v \
 #   -keystore keystore/litetv.keystore \
 #   -keyalg RSA -keysize 2048 -validity 10000 \
 #   -alias your-alias \
-#   -storepass your-store-password \
-#   -keypass your-key-password \
+#   -storepass "$STORE_PASSWORD" \
+#   -keypass "$KEY_PASSWORD" \
 #   -dname "CN=YourName, OU=Unit, O=Organization, L=Location, ST=State, C=Country"
 
-# 签名密钥库的绝对路径
-RELEASE_KEYSTORE_PATH=./keystore/litetv.keystore
+# 签名密钥库路径。相对路径按项目根目录解析（默认 keystore/litetv.keystore），也可用绝对路径。
+RELEASE_KEYSTORE_PATH=keystore/litetv.keystore
 
-# 签名密钥库密码
-RELEASE_KEYSTORE_PASSWORD=CHANGEME_KEYSTORE_PASSWORD
+# 签名密钥库密码（填入真实值，切勿提交）
+RELEASE_KEYSTORE_PASSWORD=CHANGE_ME
 
 # 签名密钥别名
-RELEASE_KEY_ALIAS=CHANGEME_KEY_ALIAS
+RELEASE_KEY_ALIAS=CHANGE_ME
 
-# 签名密钥密码
-RELEASE_KEY_PASSWORD=CHANGEME_KEYSTORE_PASSWORD
+# 签名密钥密码（填入真实值，切勿提交）
+RELEASE_KEY_PASSWORD=CHANGE_ME
 
 # 应用版本号（每次发布递增）
 APP_VERSION_CODE=1

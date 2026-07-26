@@ -18,8 +18,9 @@ android {
 
     signingConfigs {
         release {
-            // 从 gradle.properties 读取签名配置
-            storeFile file(findProperty('RELEASE_KEYSTORE_PATH') ?: './keystore/litetv.keystore')
+            // 从 gradle.properties 读取签名配置；相对路径按项目根目录解析，
+            // 否则 file() 会解析到 app/ 下而找不到 keystore。
+            storeFile rootProject.file(findProperty('RELEASE_KEYSTORE_PATH') ?: 'keystore/litetv.keystore')
             storePassword findProperty('RELEASE_KEYSTORE_PASSWORD')
             keyAlias findProperty('RELEASE_KEY_ALIAS')
             keyPassword findProperty('RELEASE_KEY_PASSWORD')
