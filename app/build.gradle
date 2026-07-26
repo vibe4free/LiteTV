@@ -10,17 +10,33 @@ android {
         applicationId 'com.cabletv.player'
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName '1.0.0'
+        versionCode project.properties.containsKey('APP_VERSION_CODE') ?
+                        Integer.parseInt(project.properties['APP_VERSION_CODE']) : 1
+        versionName project.properties.containsKey('APP_VERSION_NAME') ?
+                        project.properties['APP_VERSION_NAME'] : '1.0.0'
+    }
+
+    signingConfigs {
+        release {
+            // 从 gradle.properties 读取签名配置
+            storeFile file(findProperty('RELEASE_KEYSTORE_PATH') ?: './keystore/litetv.keystore')
+            storePassword findProperty('RELEASE_KEYSTORE_PASSWORD')
+            keyAlias findProperty('RELEASE_KEY_ALIAS')
+            keyPassword findProperty('RELEASE_KEY_PASSWORD')
+        }
     }
 
     buildTypes {
         debug {
             minifyEnabled false
+            debuggable true
         }
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
+            debuggable false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 

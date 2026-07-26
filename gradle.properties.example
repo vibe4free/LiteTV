@@ -1,0 +1,36 @@
+# Release Signing Configuration (本地配置模板)
+#
+# 复制本文件为 gradle.properties，然后填入实际的签名信息
+# 该文件应该在本地保留，不要提交到 git
+#
+# 创建方式：
+# keytool -genkey -v \
+#   -keystore keystore/litetv.keystore \
+#   -keyalg RSA -keysize 2048 -validity 10000 \
+#   -alias your-alias \
+#   -storepass your-store-password \
+#   -keypass your-key-password \
+#   -dname "CN=YourName, OU=Unit, O=Organization, L=Location, ST=State, C=Country"
+
+# 签名密钥库的绝对路径
+RELEASE_KEYSTORE_PATH=./keystore/litetv.keystore
+
+# 签名密钥库密码
+RELEASE_KEYSTORE_PASSWORD=CHANGEME_KEYSTORE_PASSWORD
+
+# 签名密钥别名
+RELEASE_KEY_ALIAS=CHANGEME_KEY_ALIAS
+
+# 签名密钥密码
+RELEASE_KEY_PASSWORD=CHANGEME_KEYSTORE_PASSWORD
+
+# 应用版本号（每次发布递增）
+APP_VERSION_CODE=1
+
+# 应用版本名
+APP_VERSION_NAME=1.0.0
+
+# 其他 Gradle 配置
+org.gradle.jvmargs=-Xmx2048m
+org.gradle.parallel=true
+org.gradle.caching=true

@@ -20,3 +20,14 @@ local.properties
 
 # Log Files
 *.log
+
+# Release Signing (Sensitive Files - DO NOT COMMIT)
+gradle.properties
+keystore/
+!gradle.properties.example
+
+# Keystore and signing files
+*.keystore
+*.jks
+*.p12
+*.pfx
