@@ -80,30 +80,26 @@ public class MainActivity extends Activity {
                 // Reset to first channel when playlist updates
                 mCurrentChannelIndex = 0;
                 playChannel(mCurrentChannelIndex);
+
+                // Trigger EPG bulk preload now that channels are truly available (no race with reload())
+                if (!AppConfig.isEpgCacheValid()) {
+                    java.util.List<Channel> allChannels = mChannelRepository.getAllChannels();
+                    if (allChannels != null && !allChannels.isEmpty()) {
+                        Log.d(TAG, "Triggering EPG bulk preload for " + allChannels.size() + " channels");
+                        mEpgManager.preloadEpgForAllChannels(allChannels);
+                    }
+                }
             }
         });
 
         // Load channels from configured source or use test URL if none configured
         String m3uUrl = AppConfig.getM3uUrl();
 
-        mChannelRepository.reload();
+        // Load EPG from cache first (if exists) for faster startup (stale-while-revalidate)
+        Log.d(TAG, "Loading EPG from cache if available...");
+        mEpgManager.loadFromCache();
 
-        // Check EPG cache and preload if needed
-        Log.d(TAG, "Checking EPG cache validity...");
-        if (!AppConfig.isEpgCacheValid()) {
-            Log.d(TAG, "EPG cache is stale or missing, preloading from network...");
-            new Thread(() -> {
-                java.util.List<Channel> allChannels = mChannelRepository.getAllChannels();
-                if (allChannels != null && !allChannels.isEmpty()) {
-                    mEpgManager.preloadEpgForAllChannels(allChannels);
-                    Log.d(TAG, "EPG preload from network completed");
-                }
-            }).start();
-        } else {
-            Log.d(TAG, "EPG cache is still valid, loading from cache...");
-            // Try to load from cache file for faster startup
-            mEpgManager.loadFromCache();
-        }
+        mChannelRepository.reload();
 
         // Set up audio manager for volume control
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
@@ -156,6 +152,12 @@ public class MainActivity extends Activity {
             case VOLUME_DOWN:
                 handleVolumeDown();
                 return true;
+            case LEFT:
+                handleFocusLeft();
+                return true;
+            case RIGHT:
+                handleFocusRight();
+                return true;
             case OK:
                 handleOk();
                 return true;
@@ -180,31 +182,26 @@ public class MainActivity extends Activity {
         Log.d(TAG, "handleChannelUp: mChannelListVisible=" + mChannelListVisible);
 
         if (mChannelListVisible && mChannelListComponent != null) {
-            boolean swapped = AppConfig.isChannelUpDownSwapped();
-
-            // If program list is visible, scroll it (affected by config)
-            if (mChannelListComponent.isProgramListVisible()) {
-                // UP: swapped means scroll down, else scroll up
-                mChannelListComponent.scrollProgramList(swapped);
-                Log.d(TAG, "handleChannelUp: Scrolling program list");
+            // If focus is on program list, navigate it (UP always moves up)
+            if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
+                Log.d(TAG, "handleChannelUp: Focus on programs, moving selection up");
+                mChannelListComponent.moveProgramSelection(false); // false = move up
                 return;
             }
 
-            // Otherwise, navigate channel list (never affected by config)
+            // Otherwise, navigate channel list (UP = highlight move up = previous channel)
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                // Always: UP means next (index+1)
-                selected = (selected + 1) % count;
-                Log.d(TAG, "handleChannelUp: Selecting next channel: " + selected);
+                selected = (selected - 1 + count) % count; // UP = previous channel
+                Log.d(TAG, "handleChannelUp: Selecting channel: " + selected);
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
-            // No channel list visible: change channel (never affected by config)
+            // No channel list visible: change channel (UP = next channel)
             int count = mChannelRepository.getChannelCount();
             Log.d(TAG, "handleChannelUp: Channel list not visible, count=" + count);
             if (count > 0) {
-                // Always: UP means next
                 mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
                 Log.d(TAG, "handleChannelUp: Calling playChannel with index=" + mCurrentChannelIndex);
                 playChannel(mCurrentChannelIndex);
@@ -220,29 +217,27 @@ public class MainActivity extends Activity {
         mLastChannelSwitchTime = now;
 
         if (mChannelListVisible && mChannelListComponent != null) {
-            boolean swapped = AppConfig.isChannelUpDownSwapped();
-
-            // If program list is visible, scroll it (affected by config)
-            if (mChannelListComponent.isProgramListVisible()) {
-                // DOWN: swapped means scroll up, else scroll down
-                mChannelListComponent.scrollProgramList(!swapped);
+            // If focus is on program list, navigate it (DOWN always moves down)
+            if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
+                Log.d(TAG, "handleChannelDown: Focus on programs, moving selection down");
+                mChannelListComponent.moveProgramSelection(true); // true = move down
                 return;
             }
 
-            // Otherwise, navigate channel list (never affected by config)
+            // Otherwise, navigate channel list (DOWN = highlight move down = next channel)
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                // Always: DOWN means previous (index-1)
-                selected = (selected - 1 + count) % count;
+                selected = (selected + 1) % count; // DOWN = next channel
+                Log.d(TAG, "handleChannelDown: Selecting channel: " + selected);
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
-            // No channel list visible: change channel (never affected by config)
+            // No channel list visible: change channel (DOWN = previous channel)
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                // Always: DOWN means previous
                 mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
+                Log.d(TAG, "handleChannelDown: Calling playChannel with index=" + mCurrentChannelIndex);
                 playChannel(mCurrentChannelIndex);
             }
         }
@@ -263,6 +258,20 @@ public class MainActivity extends Activity {
             audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC,
                     AudioManager.ADJUST_LOWER,
                     AudioManager.FLAG_SHOW_UI);
+        }
+    }
+
+    private void handleFocusLeft() {
+        if (mChannelListVisible && mChannelListComponent != null) {
+            Log.d(TAG, "handleFocusLeft: Moving focus to channels");
+            mChannelListComponent.moveFocusToChannels();
+        }
+    }
+
+    private void handleFocusRight() {
+        if (mChannelListVisible && mChannelListComponent != null) {
+            Log.d(TAG, "handleFocusRight: Moving focus to programs");
+            mChannelListComponent.moveFocusToPrograms();
         }
     }
 
@@ -288,8 +297,6 @@ public class MainActivity extends Activity {
         if (mChannelListComponent == null) {
             mChannelListComponent = new ChannelListComponent(
                     this, mChannelRepository.getAllChannels());
-            mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
-            mChannelListComponent.selectChannel(mCurrentChannelIndex);
             mChannelListComponent.setEpgManager(mEpgManager);
 
             // Set channel selection listener
@@ -315,7 +322,10 @@ public class MainActivity extends Activity {
                 parent.addView(mChannelListComponent);
             }
         }
+        // Always refresh when opening menu to show current channel and program
         if (mChannelListComponent != null) {
+            mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
+            mChannelListComponent.selectChannel(mCurrentChannelIndex);
             mChannelListComponent.setVisibility(android.view.View.VISIBLE);
         }
     }

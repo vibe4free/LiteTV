@@ -1,6 +1,8 @@
 package com.cabletv.player.epg;
 
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import com.cabletv.player.config.AppConfig;
@@ -29,6 +31,9 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.HashSet;
 import java.util.zip.GZIPInputStream;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -38,8 +43,15 @@ import javax.xml.parsers.ParserConfigurationException;
 public class EpgManager {
     private static final String TAG = "EpgManager";
     private final Context mContext;
-    private final Map<String, List<Program>> mProgramsByChannel = new HashMap<>();
+    private final Map<String, List<Program>> mProgramsByChannel = new ConcurrentHashMap<>();
     private final EpgCache mCache;
+    private volatile boolean mBulkLoadInProgress = false;
+    private final Set<String> mLoadingTvgIds = Collections.synchronizedSet(new HashSet<>());
+    private OnEpgUpdatedListener mListener;
+
+    public interface OnEpgUpdatedListener {
+        void onEpgUpdated();
+    }
 
     public enum EpgSourceType {
         AUTO,           // Auto-detect based on URL
@@ -65,6 +77,20 @@ public class EpgManager {
         mCache = new EpgCache(mContext);
     }
 
+    public void setOnEpgUpdatedListener(OnEpgUpdatedListener listener) {
+        mListener = listener;
+    }
+
+    private void notifyEpgUpdated() {
+        if (mListener != null) {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if (mListener != null) {
+                    mListener.onEpgUpdated();
+                }
+            });
+        }
+    }
+
     public void loadEpg(Channel channel) {
         Log.d(TAG, "loadEpg called for channel: " + (channel != null ? channel.name : "null"));
         if (channel == null || channel.tvgId == null || channel.tvgId.isEmpty()) {
@@ -72,10 +98,30 @@ public class EpgManager {
             return;
         }
 
+        // Check if data already exists
+        List<Program> existing = mProgramsByChannel.get(channel.tvgId);
+        if (existing != null && !existing.isEmpty()) {
+            Log.d(TAG, "loadEpg: " + channel.name + " already has EPG data, skipping");
+            return;
+        }
+
+        // Check if bulk load is in progress
+        if (mBulkLoadInProgress) {
+            Log.d(TAG, "loadEpg: Bulk load in progress, skipping per-channel load for " + channel.name);
+            return;
+        }
+
+        // Check if this channel is already being loaded
+        if (!mLoadingTvgIds.add(channel.tvgId)) {
+            Log.d(TAG, "loadEpg: " + channel.name + " is already being loaded, skipping duplicate");
+            return;
+        }
+
         String epgUrl = AppConfig.getEpgUrl();
         Log.d(TAG, "EPG URL from config: " + epgUrl);
         if (epgUrl == null || epgUrl.isEmpty()) {
             Log.d(TAG, "EPG URL is empty, returning");
+            mLoadingTvgIds.remove(channel.tvgId);
             return;
         }
 
@@ -95,6 +141,7 @@ public class EpgManager {
         } else {
             Log.d(TAG, "No valid EPG cache found");
         }
+        notifyEpgUpdated();
     }
 
     public void preloadEpgForAllChannels(java.util.List<Channel> channels) {
@@ -110,6 +157,14 @@ public class EpgManager {
             return;
         }
 
+        // Check if cache has today's EPG version
+        if (mCache.isCacheTodayVersion()) {
+            Log.d(TAG, "Using cached EPG data from today, skipping download");
+            loadFromCache();
+            return;
+        }
+
+        Log.d(TAG, "EPG cache outdated or missing, downloading new data");
         EpgSourceType type = detectEpgSourceType(epgUrl);
         if (type == EpgSourceType.XMLTV) {
             // For XMLTV, we can load all channels at once
@@ -127,6 +182,7 @@ public class EpgManager {
     }
 
     private void loadAllXmltvEpg(java.util.List<Channel> channels, String xmltvUrl) {
+        mBulkLoadInProgress = true;
         new Thread(() -> {
             try {
                 byte[] data = fetchUrlAsBytes(xmltvUrl);
@@ -158,6 +214,10 @@ public class EpgManager {
                 Log.d(TAG, "✓ EPG cache saved successfully");
             } catch (Exception e) {
                 Log.e(TAG, "Error loading all XMLTV EPG: " + e.getMessage(), e);
+            } finally {
+                mBulkLoadInProgress = false;
+                notifyEpgUpdated();
+                Log.d(TAG, "Bulk EPG load completed, notifying listeners");
             }
         }).start();
     }
@@ -247,6 +307,10 @@ public class EpgManager {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Error loading EPG for " + channel.name, e);
+            } finally {
+                mLoadingTvgIds.remove(channel.tvgId);
+                notifyEpgUpdated();
+                Log.d(TAG, "Per-channel EPG load completed for " + channel.name + ", notifying listeners");
             }
         }).start();
     }
@@ -388,7 +452,7 @@ public class EpgManager {
     }
 
     public String getCurrentProgramInfo(Channel channel) {
-        Program program = getCurrentProgram(channel);
+        Program program = getCurrentProgramWithTime(channel);
         if (program != null) {
             return program.title;
         }

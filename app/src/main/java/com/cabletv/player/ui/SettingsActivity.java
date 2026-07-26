@@ -20,7 +20,6 @@ public class SettingsActivity extends Activity {
     private CheckBox mWebServerToggle;
     private TextView mWebServerAddress;
     private CheckBox mEpgDisplayToggle;
-    private CheckBox mChannelUpDownSwapToggle;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,16 +44,6 @@ public class SettingsActivity extends Activity {
             createToggleIfNotExists();
         }
 
-        // Find or create channel up/down swap toggle
-        try {
-            mChannelUpDownSwapToggle = findViewById(R.id.channel_up_down_swap_toggle);
-            if (mChannelUpDownSwapToggle == null) {
-                createToggleIfNotExists();
-            }
-        } catch (Exception e) {
-            createToggleIfNotExists();
-        }
-
         // Load current values
         loadValues();
 
@@ -69,13 +58,6 @@ public class SettingsActivity extends Activity {
                 Toast.makeText(this, isChecked ? "EPG display enabled" : "EPG display disabled", Toast.LENGTH_SHORT).show();
             });
         }
-
-        if (mChannelUpDownSwapToggle != null) {
-            mChannelUpDownSwapToggle.setOnCheckedChangeListener((btn, isChecked) -> {
-                AppConfig.setChannelUpDownSwapped(isChecked);
-                Toast.makeText(this, isChecked ? "Channel up/down swapped" : "Channel up/down normal", Toast.LENGTH_SHORT).show();
-            });
-        }
     }
 
     private void loadValues() {
@@ -84,9 +66,6 @@ public class SettingsActivity extends Activity {
         mWebServerToggle.setChecked(AppConfig.isWebServerEnabled());
         if (mEpgDisplayToggle != null) {
             mEpgDisplayToggle.setChecked(AppConfig.isEpgDisplayEnabled());
-        }
-        if (mChannelUpDownSwapToggle != null) {
-            mChannelUpDownSwapToggle.setChecked(AppConfig.isChannelUpDownSwapped());
         }
         updateWebServerAddress();
     }

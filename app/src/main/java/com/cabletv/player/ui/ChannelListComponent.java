@@ -34,10 +34,15 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     private List<Channel> mChannels = new ArrayList<>();
     private int mCurrentChannelIndex = 0;
     private int mSelectedChannelIndex = 0;
+    private int mSelectedProgramIndex = 0;
     private OnChannelSelectedListener mSelectionListener;
     private EpgManager mEpgManager;
     private boolean mProgramListVisible = false;
-    private static final long EPG_REFRESH_INTERVAL = 1000; // Refresh EPG display every 1 second
+    private static final long EPG_REFRESH_INTERVAL = 1000;
+    private static final String TAG = "ChannelListComponent";
+
+    public enum FocusPanel { CHANNELS, PROGRAMS }
+    private FocusPanel mFocusPanel = FocusPanel.CHANNELS;
 
     public interface OnChannelSelectedListener {
         void onChannelSelected(int index, Channel channel);
@@ -88,7 +93,6 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
         mRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         mRecyclerView.setBackgroundColor(0x00000000);
-        // Don't request focus - let MainActivity handle all key events
         mRecyclerView.setFocusable(false);
         channelSection.addView(mRecyclerView);
 
@@ -123,6 +127,15 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     public void setEpgManager(EpgManager epgManager) {
         mEpgManager = epgManager;
         mAdapter.setEpgManager(epgManager);
+        if (mEpgManager != null) {
+            mEpgManager.setOnEpgUpdatedListener(() -> {
+                Log.d(TAG, "EPG updated, refreshing adapter and program list");
+                if (mAdapter != null) {
+                    mAdapter.notifyDataSetChanged();
+                }
+                refreshProgramListForCurrentSelection();
+            });
+        }
     }
 
     public void setOnChannelSelectedListener(OnChannelSelectedListener listener) {
@@ -143,6 +156,38 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mRecyclerView.scrollToPosition(index);
     }
 
+    private void refreshProgramListForCurrentSelection() {
+        if (mSelectedChannelIndex < 0 || mSelectedChannelIndex >= mChannels.size()) return;
+        if (mEpgManager == null || mProgramListContainer == null) return;
+
+        Channel selectedChannel = mChannels.get(mSelectedChannelIndex);
+        List<EpgManager.Program> programs = mEpgManager.getAllPrograms(selectedChannel);
+        if (!programs.isEmpty()) {
+            ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), programs);
+            mProgramRecyclerView.setAdapter(programAdapter);
+            mProgramListContainer.setVisibility(VISIBLE);
+            mProgramListVisible = true;
+
+            // Find and select the currently playing program
+            long currentTime = System.currentTimeMillis();
+            int currentProgramIndex = 0;
+            for (int i = 0; i < programs.size(); i++) {
+                EpgManager.Program prog = programs.get(i);
+                if (currentTime >= prog.startTime && currentTime < prog.endTime) {
+                    currentProgramIndex = i;
+                    break;
+                }
+            }
+            mSelectedProgramIndex = currentProgramIndex;
+            programAdapter.setSelectedIndex(currentProgramIndex);
+            programAdapter.setFocused(mFocusPanel == FocusPanel.PROGRAMS);
+            mProgramRecyclerView.scrollToPosition(currentProgramIndex);
+        } else {
+            mProgramListContainer.setVisibility(GONE);
+            mProgramListVisible = false;
+        }
+    }
+
     public void selectChannel(int index) {
         if (index < 0 || index >= mChannels.size()) return;
         int oldIndex = mSelectedChannelIndex;
@@ -150,20 +195,17 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mAdapter.setSelectedChannel(oldIndex, index);
         mRecyclerView.scrollToPosition(index);
 
-        // Show program list for selected channel
-        if (mEpgManager != null && mProgramListContainer != null) {
-            Channel selectedChannel = mChannels.get(index);
-            List<EpgManager.Program> programs = mEpgManager.getAllPrograms(selectedChannel);
-            if (!programs.isEmpty()) {
-                ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), programs);
-                mProgramRecyclerView.setAdapter(programAdapter);
-                mProgramListContainer.setVisibility(VISIBLE);
-                mProgramListVisible = true;
-            } else {
-                mProgramListContainer.setVisibility(GONE);
-                mProgramListVisible = false;
-            }
+        // Reset focus to channels panel when selecting a channel
+        mFocusPanel = FocusPanel.CHANNELS;
+        mAdapter.setFocusOnChannels(true);
+
+        // Trigger EPG load if needed (dedup and throttling built into loadEpg now)
+        if (mEpgManager != null) {
+            mEpgManager.loadEpg(mChannels.get(index));
         }
+
+        // Refresh program list for current selection
+        refreshProgramListForCurrentSelection();
     }
 
     public void confirmSelection() {
@@ -176,26 +218,37 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         return mSelectedChannelIndex;
     }
 
-    public boolean isProgramListVisible() {
-        return mProgramListVisible;
+    public FocusPanel getFocusPanel() {
+        return mFocusPanel;
     }
 
-    public void scrollProgramList(boolean down) {
-        if (!mProgramListVisible || mProgramRecyclerView == null) {
-            return;
+    public void moveFocusToPrograms() {
+        if (!mProgramListVisible) return;
+        mFocusPanel = FocusPanel.PROGRAMS;
+        mAdapter.setFocusOnChannels(false);
+        if (mProgramRecyclerView.getAdapter() != null) {
+            ((ProgramListAdapter) mProgramRecyclerView.getAdapter()).setFocused(true);
         }
-        LinearLayoutManager layoutManager =
-            (LinearLayoutManager) mProgramRecyclerView.getLayoutManager();
-        if (layoutManager != null) {
-            int currentPosition = layoutManager.findFirstVisibleItemPosition();
-            if (down) {
-                mProgramRecyclerView.smoothScrollToPosition(currentPosition + 1);
-            } else {
-                if (currentPosition > 0) {
-                    mProgramRecyclerView.smoothScrollToPosition(currentPosition - 1);
-                }
-            }
+    }
+
+    public void moveFocusToChannels() {
+        mFocusPanel = FocusPanel.CHANNELS;
+        mAdapter.setFocusOnChannels(true);
+        if (mProgramRecyclerView.getAdapter() != null) {
+            ((ProgramListAdapter) mProgramRecyclerView.getAdapter()).setFocused(false);
         }
+    }
+
+    public void moveProgramSelection(boolean down) {
+        RecyclerView.Adapter<?> adapter = mProgramRecyclerView.getAdapter();
+        if (mFocusPanel != FocusPanel.PROGRAMS || adapter == null) return;
+        int count = adapter.getItemCount();
+        if (count == 0) return;
+        int newIndex = Math.max(0, Math.min(count - 1, mSelectedProgramIndex + (down ? 1 : -1)));
+        if (newIndex == mSelectedProgramIndex) return;
+        mSelectedProgramIndex = newIndex;
+        ((ProgramListAdapter) adapter).setSelectedIndex(newIndex);
+        mProgramRecyclerView.scrollToPosition(newIndex);
     }
 
     @Override
@@ -249,6 +302,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         private List<Channel> mChannels;
         private int mCurrentIndex = 0;
         private int mSelectedIndex = 0;
+        private boolean mFocusOnChannels = true;
         private EpgManager mEpgManager;
 
         public ChannelListAdapter(Context context, List<Channel> channels) {
@@ -258,7 +312,6 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
         public void setEpgManager(EpgManager epgManager) {
             mEpgManager = epgManager;
-            // Refresh all items when EPG is set (in case it was loaded asynchronously)
             notifyDataSetChanged();
         }
 
@@ -282,6 +335,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             notifyItemChanged(newIndex);
         }
 
+        public void setFocusOnChannels(boolean focus) {
+            mFocusOnChannels = focus;
+            notifyDataSetChanged();
+        }
+
         @NonNull
         @Override
         public ChannelViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
@@ -297,7 +355,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         @Override
         public void onBindViewHolder(@NonNull ChannelViewHolder holder, int position) {
             Channel channel = mChannels.get(position);
-            holder.setChannel(channel, position == mSelectedIndex, position == mCurrentIndex, mEpgManager);
+            holder.setChannel(channel, position == mSelectedIndex, position == mCurrentIndex, mEpgManager, mFocusOnChannels);
         }
 
         @Override
@@ -334,13 +392,18 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 container.addView(epgView);
             }
 
-            void setChannel(Channel channel, boolean isSelected, boolean isCurrent, EpgManager epgManager) {
+            void setChannel(Channel channel, boolean isSelected, boolean isCurrent, EpgManager epgManager, boolean focusOnChannels) {
                 nameView.setText(channel.name);
 
-                if (isSelected) {
+                if (isSelected && focusOnChannels) {
                     nameView.setTextColor(0xFFFF6B35);
                     nameView.setTextSize(15);
                     container.setBackgroundColor(0x33FF6B35);
+                } else if (isSelected && !focusOnChannels) {
+                    // Selected but focus on program list - dimmer highlight
+                    nameView.setTextColor(0xFFFF9966);
+                    nameView.setTextSize(14);
+                    container.setBackgroundColor(0x1AFF6B35);
                 } else if (isCurrent) {
                     nameView.setTextColor(0xFFFFFFFF);
                     nameView.setTextSize(14);
@@ -379,10 +442,31 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     public static class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.ProgramViewHolder> {
         private final Context mContext;
         private final List<EpgManager.Program> mPrograms;
+        private int mSelectedIndex = -1;
+        private boolean mFocused = false;
 
         public ProgramListAdapter(Context context, List<EpgManager.Program> programs) {
             mContext = context;
             mPrograms = new ArrayList<>(programs);
+        }
+
+        public void setSelectedIndex(int index) {
+            if (mSelectedIndex == index) return;
+            int oldIndex = mSelectedIndex;
+            mSelectedIndex = index;
+            if (oldIndex >= 0 && oldIndex < mPrograms.size()) {
+                notifyItemChanged(oldIndex);
+            }
+            if (mSelectedIndex >= 0 && mSelectedIndex < mPrograms.size()) {
+                notifyItemChanged(mSelectedIndex);
+            }
+        }
+
+        public void setFocused(boolean focused) {
+            if (mFocused != focused) {
+                mFocused = focused;
+                notifyDataSetChanged();
+            }
         }
 
         @NonNull
@@ -400,7 +484,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         @Override
         public void onBindViewHolder(@NonNull ProgramViewHolder holder, int position) {
             EpgManager.Program program = mPrograms.get(position);
-            holder.setProgram(program);
+            holder.setProgram(program, position == mSelectedIndex, mFocused);
         }
 
         @Override
@@ -440,7 +524,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 container.addView(titleView);
             }
 
-            void setProgram(EpgManager.Program program) {
+            void setProgram(EpgManager.Program program, boolean isSelected, boolean focused) {
                 titleView.setText(program.title);
 
                 // Format time display
@@ -453,14 +537,26 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                     timeView.setText("");
                 }
 
-                // Highlight current/next program
+                // Highlight current/next program based on wall-clock time
                 long currentTime = System.currentTimeMillis();
-                if (currentTime >= program.startTime && currentTime < program.endTime) {
+                boolean isCurrentProgram = currentTime >= program.startTime && currentTime < program.endTime;
+
+                // Apply cursor highlight if selected
+                if (isSelected && focused) {
                     container.setBackgroundColor(0x33FF6B35);
                     titleView.setTextColor(0xFFFFFFFF);
+                } else if (isSelected && !focused) {
+                    // Selected but focus not on program list
+                    container.setBackgroundColor(0x1AFF6B35);
+                    titleView.setTextColor(0xFFDDCCCC);
                 } else {
                     container.setBackgroundColor(0x00000000);
                     titleView.setTextColor(0xFFCCCCCC);
+                }
+
+                // Mark currently broadcasting program with visual indicator (optional prefix or color)
+                if (isCurrentProgram) {
+                    timeView.setTextColor(0xFFFF9966);
                 }
             }
 

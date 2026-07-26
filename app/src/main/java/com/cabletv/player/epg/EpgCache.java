@@ -144,4 +144,42 @@ public class EpgCache {
         long ageHours = (System.currentTimeMillis() - cacheTimestamp) / (1000 * 60 * 60);
         return ageHours < validityHours;
     }
+
+    public boolean isCacheTodayVersion() {
+        if (!mCacheFile.exists()) {
+            Log.d(TAG, "EPG cache file does not exist");
+            return false;
+        }
+
+        try {
+            JsonObject root = mGson.fromJson(new FileReader(mCacheFile), JsonObject.class);
+            if (root == null || !root.has("timestamp")) {
+                return false;
+            }
+
+            long cacheTimestamp = root.getAsJsonPrimitive("timestamp").getAsLong();
+            long currentDate = getCurrentDateTimestamp();
+            long cacheDate = getDateFromTimestamp(cacheTimestamp);
+
+            boolean isSameDay = cacheDate == currentDate;
+            Log.d(TAG, "Cache date check - Same day: " + isSameDay);
+
+            return isSameDay;
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking cache date: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private long getCurrentDateTimestamp() {
+        return getDateFromTimestamp(System.currentTimeMillis());
+    }
+
+    private long getDateFromTimestamp(long timestamp) {
+        return (timestamp / (24 * 3600 * 1000)) * (24 * 3600 * 1000);
+    }
+
+    public boolean cacheFileExists() {
+        return mCacheFile.exists();
+    }
 }

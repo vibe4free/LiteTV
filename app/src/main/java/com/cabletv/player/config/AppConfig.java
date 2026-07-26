@@ -12,7 +12,6 @@ public class AppConfig {
     private static final String SIDEBAR_ALPHA_KEY = "app_sidebar_alpha";
     private static final String M3U_FILE_PATH_KEY = "app_m3u_file_path";
     private static final String EPG_DISPLAY_KEY = "app_epg_display_enabled";
-    private static final String CHANNEL_UP_DOWN_SWAP_KEY = "app_channel_up_down_swap";
     private static final String EPG_LAST_UPDATE_KEY = "app_epg_last_update";
     private static final String EPG_CACHE_VALIDITY_HOURS_KEY = "app_epg_cache_hours";
 
@@ -20,7 +19,6 @@ public class AppConfig {
     private static final int DEFAULT_WEB_SERVER_PORT = 8899;
     private static final float DEFAULT_SIDEBAR_ALPHA = 0.75f;
     private static final int DEFAULT_EPG_CACHE_HOURS = 24; // EPG 缓存 24 小时后刷新
-    private static final boolean DEFAULT_CHANNEL_UP_DOWN_SWAP = true; // Default to swapped for program list
 
     // M3U URL
     public static String getM3uUrl() {
@@ -82,15 +80,6 @@ public class AppConfig {
 
     public static void setEpgDisplayEnabled(boolean enabled) {
         Hawk.put(EPG_DISPLAY_KEY, enabled);
-    }
-
-    // Channel up/down swap toggle (only affects program list scroll)
-    public static boolean isChannelUpDownSwapped() {
-        return Hawk.get(CHANNEL_UP_DOWN_SWAP_KEY, DEFAULT_CHANNEL_UP_DOWN_SWAP);
-    }
-
-    public static void setChannelUpDownSwapped(boolean swapped) {
-        Hawk.put(CHANNEL_UP_DOWN_SWAP_KEY, swapped);
     }
 
     // EPG cache management
