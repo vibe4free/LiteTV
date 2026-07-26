@@ -142,24 +142,30 @@ public class EpgManager {
 
     private void loadXmltvEpg(Channel channel, String xmltvUrl) {
         try {
+            Log.d(TAG, "loadXmltvEpg: Starting for channel " + channel.name + " from " + xmltvUrl);
             byte[] content = fetchUrlAsBytes(xmltvUrl);
             if (content != null && content.length > 0) {
-                Log.d(TAG, "XMLTV EPG response length: " + content.length);
+                Log.d(TAG, "XMLTV EPG response length: " + content.length + " bytes");
                 String xmlString;
 
                 // Check if content is gzip compressed
                 if (isGzipCompressed(content)) {
                     Log.d(TAG, "Content is gzip compressed, decompressing...");
                     xmlString = decompressGzip(content);
+                    Log.d(TAG, "Decompressed to: " + xmlString.length() + " characters");
                 } else {
+                    Log.d(TAG, "Content is not compressed, parsing as UTF-8");
                     xmlString = new String(content, "UTF-8");
                 }
 
+                Log.d(TAG, "Starting XMLTV XML parsing...");
                 parseXmltvEpg(channel, xmlString);
                 Log.d(TAG, "XMLTV EPG loaded for channel: " + channel.name);
+            } else {
+                Log.w(TAG, "XMLTV EPG response is empty for channel: " + channel.name);
             }
         } catch (Exception e) {
-            Log.w(TAG, "Error loading XMLTV EPG for " + channel.name, e);
+            Log.e(TAG, "Error loading XMLTV EPG for " + channel.name + ": " + e.getMessage(), e);
         }
     }
 
@@ -233,27 +239,60 @@ public class EpgManager {
     }
 
     private byte[] fetchUrlAsBytes(String urlString) {
+        return fetchUrlAsBytesWithRedirect(urlString, 0);
+    }
+
+    private byte[] fetchUrlAsBytesWithRedirect(String urlString, int redirectCount) {
+        if (redirectCount > 5) {
+            Log.e(TAG, "Too many redirects!");
+            return null;
+        }
+
         try {
+            Log.d(TAG, "fetchUrlAsBytes: Starting download from " + urlString + " (redirect #" + redirectCount + ")");
             URL url = new URL(urlString);
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(10000);
+            connection.setConnectTimeout(15000);
+            connection.setReadTimeout(15000);
+            connection.setInstanceFollowRedirects(false);
 
-            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+            Log.d(TAG, "Connection opened, sending request...");
+            int responseCode = connection.getResponseCode();
+            Log.d(TAG, "Response code: " + responseCode);
+
+            if (responseCode >= 300 && responseCode < 400) {
+                String redirectLocation = connection.getHeaderField("Location");
+                Log.d(TAG, "HTTP redirect " + responseCode + " to: " + redirectLocation);
+                if (redirectLocation != null && !redirectLocation.isEmpty()) {
+                    return fetchUrlAsBytesWithRedirect(redirectLocation, redirectCount + 1);
+                }
+                return null;
+            } else if (responseCode == HttpURLConnection.HTTP_OK) {
                 ByteArrayOutputStream buffer = new ByteArrayOutputStream();
                 int read;
                 byte[] data = new byte[16384];
+                int totalRead = 0;
 
                 java.io.InputStream is = connection.getInputStream();
                 while ((read = is.read(data)) != -1) {
                     buffer.write(data, 0, read);
+                    totalRead += read;
+                    if (totalRead % (100 * 1024) == 0) {
+                        Log.d(TAG, "Read " + (totalRead / 1024) + " KB so far...");
+                    }
                 }
                 is.close();
-                return buffer.toByteArray();
+
+                byte[] result = buffer.toByteArray();
+                Log.d(TAG, "✓ Successfully fetched " + result.length + " bytes");
+                return result;
+            } else {
+                Log.e(TAG, "HTTP error: " + responseCode + " " + connection.getResponseMessage());
+                return null;
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error fetching URL: " + urlString, e);
+            Log.e(TAG, "Error fetching URL: " + urlString + " - " + e.getMessage(), e);
         }
         return null;
     }
@@ -279,14 +318,21 @@ public class EpgManager {
 
     private void parseXmltvEpg(Channel channel, String xmlString) {
         try {
+            Log.d(TAG, "parseXmltvEpg: Starting for " + channel.name + ", tvgId=" + channel.tvgId);
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             DocumentBuilder builder = factory.newDocumentBuilder();
             Document doc = builder.parse(new java.io.ByteArrayInputStream(xmlString.getBytes("UTF-8")));
 
+            Log.d(TAG, "XML document parsed successfully");
+
+            // Count total channels and programmes for debugging
+            NodeList allChannels = doc.getElementsByTagName("channel");
+            Log.d(TAG, "Total channels in XMLTV: " + allChannels.getLength());
+
             // Find the channel ID to match
             String channelId = findChannelIdByName(doc, channel);
             if (channelId == null) {
-                Log.d(TAG, "Channel not found in XMLTV for: " + channel.name);
+                Log.w(TAG, "Channel not found in XMLTV for: " + channel.name + " (tvgId: " + channel.tvgId + ")");
                 return;
             }
 
@@ -294,9 +340,13 @@ public class EpgManager {
 
             // Get current time
             long currentTime = System.currentTimeMillis();
+            Log.d(TAG, "Current time: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(currentTime)));
 
             // Find matching programme for current time
             NodeList programmes = doc.getElementsByTagName("programme");
+            Log.d(TAG, "Total programmes in XMLTV: " + programmes.getLength());
+
+            int matchedCount = 0;
             for (int i = 0; i < programmes.getLength(); i++) {
                 Element prog = (Element) programmes.item(i);
                 String progChannel = prog.getAttribute("channel");
@@ -304,6 +354,8 @@ public class EpgManager {
                 if (!progChannel.equals(channelId)) {
                     continue;
                 }
+
+                matchedCount++;
 
                 try {
                     long startTime = parseXmltvTime(prog.getAttribute("start"));
@@ -319,18 +371,19 @@ public class EpgManager {
                         if (title != null && !title.isEmpty()) {
                             Program program = new Program(title, startTime, stopTime);
                             mPrograms.put(channel.tvgId, program);
-                            Log.d(TAG, "XMLTV program matched for " + channel.name + ": " + title);
+                            Log.d(TAG, "✓ XMLTV program matched for " + channel.name + ": " + title);
                         }
                         return;
                     }
                 } catch (Exception e) {
-                    Log.d(TAG, "Error parsing programme: " + e.getMessage());
+                    Log.d(TAG, "Error parsing programme " + i + ": " + e.getMessage());
                 }
             }
 
-            Log.d(TAG, "No matching programme found for current time in channel: " + channel.name);
+            Log.w(TAG, "No matching programme found for current time in channel: " + channel.name + " (checked " + matchedCount + " programmes for this channel)");
         } catch (Exception e) {
             Log.e(TAG, "Error parsing XMLTV EPG: " + e.getMessage(), e);
+            e.printStackTrace();
         }
     }
 
