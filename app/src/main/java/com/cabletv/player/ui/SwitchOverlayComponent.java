@@ -13,6 +13,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.bumptech.glide.Glide;
+import com.cabletv.player.R;
 import com.cabletv.player.model.Channel;
 import xyz.doikki.videoplayer.controller.ControlWrapper;
 import xyz.doikki.videoplayer.controller.IControlComponent;
@@ -36,8 +37,7 @@ public class SwitchOverlayComponent extends FrameLayout implements IControlCompo
                 dp2px(200),
                 dp2px(200),
                 android.view.Gravity.CENTER));
-        mOverlay.setBackgroundColor(0xB3000000);
-        mOverlay.setAlpha(0.8f);
+        mOverlay.setBackgroundResource(R.drawable.switch_overlay_bg);
 
         // Logo
         mLogoView = new ImageView(context);
@@ -78,7 +78,16 @@ public class SwitchOverlayComponent extends FrameLayout implements IControlCompo
         }
 
         setVisibility(VISIBLE);
-        setAlpha(1.0f);
+        setAlpha(0.0f);
+        setScaleX(0.8f);
+        setScaleY(0.8f);
+
+        animate()
+                .alpha(1.0f)
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .setDuration(200)
+                .start();
 
         // Auto fade out after 2 seconds
         postDelayed(this::fadeOut, 2000);

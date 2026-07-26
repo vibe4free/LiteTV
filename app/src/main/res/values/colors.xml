@@ -8,4 +8,12 @@
     <color name="overlay_dark">#B3000000</color>
     <color name="text_primary">#FFFFFF</color>
     <color name="text_secondary">#CCCCCC</color>
+    <color name="item_selected_bg">#33FF6B35</color>
+    <color name="item_selected_dim_bg">#1AFF6B35</color>
+    <color name="item_selected_text">#FF6B35</color>
+    <color name="item_selected_dim_text">#FF9966</color>
+    <color name="epg_text_color">#888888</color>
+    <color name="next_program_text">#999999</color>
+    <color name="bg_overlay_start">#CC000000</color>
+    <color name="bg_overlay_end">#66000000</color>
 </resources>

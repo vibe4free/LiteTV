@@ -3,7 +3,9 @@ package com.cabletv.player.ui;
 import android.content.Context;
 import android.view.View;
 import android.view.animation.Animation;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -12,10 +14,12 @@ import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.epg.EpgManager;
 import com.cabletv.player.model.Channel;
 import android.util.Log;
+import com.bumptech.glide.Glide;
 import xyz.doikki.videoplayer.controller.ControlWrapper;
 import xyz.doikki.videoplayer.controller.IControlComponent;
 
@@ -69,7 +73,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     private void initView(Context context) {
         // Expanded menu: 240dp channels on left + expandable programs on right
         setLayoutParams(new LayoutParams(dp2px(240), LayoutParams.MATCH_PARENT));
-        setBackgroundColor(0xCC000000);
+        setBackgroundResource(R.drawable.gradient_sidebar_bg);
         setAlpha(AppConfig.getSidebarAlpha());
 
         LinearLayout mainContainer = new LinearLayout(context);
@@ -102,7 +106,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mProgramListContainer = new LinearLayout(context);
         mProgramListContainer.setOrientation(LinearLayout.VERTICAL);
         mProgramListContainer.setLayoutParams(new LinearLayout.LayoutParams(dp2px(300), LayoutParams.MATCH_PARENT));
-        mProgramListContainer.setBackgroundColor(0x99000000);
+        mProgramListContainer.setBackgroundColor(0x66000000);
         mProgramListContainer.setVisibility(GONE);
 
         TextView programTitle = new TextView(context);
@@ -265,14 +269,27 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     @Override
     public void onVisibilityChanged(boolean isVisible, Animation anim) {
         mIsVisible = isVisible;
-        setVisibility(isVisible ? VISIBLE : GONE);
+        if (isVisible) {
+            setVisibility(VISIBLE);
+            animate()
+                    .translationX(0)
+                    .setDuration(200)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .start();
+            // Refresh adapter when menu becomes visible to show all EPG data
+            if (mAdapter != null) {
+                mAdapter.notifyDataSetChanged();
+            }
+        } else {
+            animate()
+                    .translationX(-getWidth())
+                    .setDuration(200)
+                    .setInterpolator(new DecelerateInterpolator())
+                    .withEndAction(() -> setVisibility(GONE))
+                    .start();
+        }
         if (anim != null) {
             startAnimation(anim);
-        }
-
-        // Refresh adapter when menu becomes visible to show all EPG data
-        if (isVisible && mAdapter != null) {
-            mAdapter.notifyDataSetChanged();
         }
     }
 
@@ -365,6 +382,8 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
         static class ChannelViewHolder extends RecyclerView.ViewHolder {
             private final LinearLayout container;
+            private final ImageView logoView;
+            private final LinearLayout textContainer;
             private final TextView nameView;
             private final TextView epgView;
             private final Context context;
@@ -373,6 +392,24 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 super(itemView);
                 this.context = context;
                 this.container = itemView;
+                container.setOrientation(LinearLayout.HORIZONTAL);
+
+                // Logo
+                logoView = new ImageView(context);
+                logoView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+                logoView.setLayoutParams(new LinearLayout.LayoutParams(
+                        dp2px(36),
+                        dp2px(36)));
+                container.addView(logoView);
+
+                // Text container
+                textContainer = new LinearLayout(context);
+                textContainer.setOrientation(LinearLayout.VERTICAL);
+                textContainer.setLayoutParams(new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        1.0f));
+                textContainer.setPadding(dp2px(8), 0, 0, 0);
 
                 nameView = new TextView(context);
                 nameView.setTextColor(0xFFCCCCCC);
@@ -380,7 +417,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 nameView.setLayoutParams(new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT));
-                container.addView(nameView);
+                textContainer.addView(nameView);
 
                 epgView = new TextView(context);
                 epgView.setTextColor(0xFF888888);
@@ -389,29 +426,61 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 epgView.setLayoutParams(new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT));
-                container.addView(epgView);
+                textContainer.addView(epgView);
+
+                container.addView(textContainer);
             }
 
             void setChannel(Channel channel, boolean isSelected, boolean isCurrent, EpgManager epgManager, boolean focusOnChannels) {
                 nameView.setText(channel.name);
 
+                // Load logo
+                if (channel.logo != null && !channel.logo.isEmpty()) {
+                    Glide.with(context)
+                            .load(channel.logo)
+                            .centerInside()
+                            .into(logoView);
+                } else {
+                    logoView.setImageDrawable(null);
+                }
+
                 if (isSelected && focusOnChannels) {
                     nameView.setTextColor(0xFFFF6B35);
                     nameView.setTextSize(15);
-                    container.setBackgroundColor(0x33FF6B35);
+                    container.setBackgroundResource(R.drawable.channel_item_selected_bg);
+                    container.animate()
+                            .scaleX(1.04f)
+                            .scaleY(1.04f)
+                            .setDuration(150)
+                            .start();
                 } else if (isSelected && !focusOnChannels) {
                     // Selected but focus on program list - dimmer highlight
                     nameView.setTextColor(0xFFFF9966);
                     nameView.setTextSize(14);
-                    container.setBackgroundColor(0x1AFF6B35);
+                    container.setBackgroundResource(R.drawable.channel_item_selected_dim_bg);
+                    container.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(150)
+                            .start();
                 } else if (isCurrent) {
                     nameView.setTextColor(0xFFFFFFFF);
                     nameView.setTextSize(14);
                     container.setBackgroundColor(0x00000000);
+                    container.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(150)
+                            .start();
                 } else {
                     nameView.setTextColor(0xFFCCCCCC);
                     nameView.setTextSize(14);
                     container.setBackgroundColor(0x00000000);
+                    container.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(150)
+                            .start();
                 }
 
                 // Show EPG info if enabled
@@ -543,15 +612,30 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
                 // Apply cursor highlight if selected
                 if (isSelected && focused) {
-                    container.setBackgroundColor(0x33FF6B35);
+                    container.setBackgroundResource(R.drawable.channel_item_selected_bg);
                     titleView.setTextColor(0xFFFFFFFF);
+                    container.animate()
+                            .scaleX(1.04f)
+                            .scaleY(1.04f)
+                            .setDuration(150)
+                            .start();
                 } else if (isSelected && !focused) {
                     // Selected but focus not on program list
-                    container.setBackgroundColor(0x1AFF6B35);
+                    container.setBackgroundResource(R.drawable.channel_item_selected_dim_bg);
                     titleView.setTextColor(0xFFDDCCCC);
+                    container.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(150)
+                            .start();
                 } else {
                     container.setBackgroundColor(0x00000000);
                     titleView.setTextColor(0xFFCCCCCC);
+                    container.animate()
+                            .scaleX(1.0f)
+                            .scaleY(1.0f)
+                            .setDuration(150)
+                            .start();
                 }
 
                 // Mark currently broadcasting program with visual indicator (optional prefix or color)

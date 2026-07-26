@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Channel List Dimensions -->
+    <dimen name="channel_item_height">60dp</dimen>
+    <dimen name="channel_logo_size">36dp</dimen>
+    <dimen name="sidebar_width">240dp</dimen>
+
+    <!-- Program List Dimensions -->
+    <dimen name="program_item_height">40dp</dimen>
+    <dimen name="program_panel_width">300dp</dimen>
+
+    <!-- Playback Info Dimensions -->
+    <dimen name="playback_info_height">100dp</dimen>
+
+    <!-- Corner Radius -->
+    <dimen name="card_corner_radius">12dp</dimen>
+    <dimen name="item_corner_radius">8dp</dimen>
+</resources>

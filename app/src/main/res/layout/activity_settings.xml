@@ -22,8 +22,7 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:spacing="16dp">
+            android:orientation="vertical">
 
             <!-- Web Server Section -->
             <LinearLayout
@@ -91,13 +90,19 @@
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="textUri"
+                    android:background="@drawable/edittext_focus_selector"
+                    android:padding="12dp"
                     android:layout_marginBottom="8dp" />
 
                 <Button
                     android:id="@+id/save_m3u_btn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Save" />
+                    android:text="Save"
+                    android:background="@drawable/button_focus_selector"
+                    android:textColor="@color/text_primary"
+                    android:padding="12dp"
+                    android:focusable="true" />
 
             </LinearLayout>
 
@@ -133,13 +138,19 @@
                     android:textColor="@color/text_primary"
                     android:textColorHint="@color/text_secondary"
                     android:inputType="textUri"
+                    android:background="@drawable/edittext_focus_selector"
+                    android:padding="12dp"
                     android:layout_marginBottom="8dp" />
 
                 <Button
                     android:id="@+id/save_epg_btn"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Save" />
+                    android:text="Save"
+                    android:background="@drawable/button_focus_selector"
+                    android:textColor="@color/text_primary"
+                    android:padding="12dp"
+                    android:focusable="true" />
 
                 <CheckBox
                     android:id="@+id/epg_display_toggle"
@@ -151,17 +162,6 @@
 
             </LinearLayout>
 
-            <!-- Channel Control Section -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp"
-                android:layout_marginTop="16dp"
-                android:background="@drawable/settings_section_bg">
-
-
-            </LinearLayout>
 
         </LinearLayout>
 

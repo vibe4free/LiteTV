@@ -12,6 +12,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.cabletv.player.R;
 import com.cabletv.player.epg.EpgManager;
 import com.cabletv.player.model.Channel;
 import xyz.doikki.videoplayer.controller.ControlWrapper;
@@ -34,7 +35,7 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
 
     private void initView(Context context) {
         setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, dp2px(100)));
-        setBackgroundColor(0xCC000000);
+        setBackgroundResource(R.drawable.gradient_playback_info_bg);
 
         mInfoContainer = new LinearLayout(context);
         mInfoContainer.setOrientation(LinearLayout.VERTICAL);
@@ -81,7 +82,7 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
         mProgressBar.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp2px(4)));
-        mProgressBar.setProgressDrawable(context.getDrawable(android.R.drawable.progress_horizontal));
+        mProgressBar.setProgressDrawable(context.getDrawable(R.drawable.progress_bar_accent));
         programRow.addView(mProgressBar);
 
         mNextProgramView = new TextView(context);
@@ -159,6 +160,11 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
 
     private void showWithAutoHide() {
         setVisibility(VISIBLE);
+        setAlpha(0.0f);
+        animate()
+                .alpha(1.0f)
+                .setDuration(300)
+                .start();
         removeCallbacks(this::hide);
         postDelayed(this::hide, mAutoHideDelay);
     }

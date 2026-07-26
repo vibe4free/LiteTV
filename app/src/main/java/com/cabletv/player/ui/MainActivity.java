@@ -26,6 +26,7 @@ public class MainActivity extends Activity {
     private EpgManager mEpgManager;
     private ChannelListComponent mChannelListComponent;
     private PlaybackInfoComponent mPlaybackInfoComponent;
+    private SwitchOverlayComponent mSwitchOverlayComponent;
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
     private boolean mChannelListVisible = false;
@@ -67,6 +68,14 @@ public class MainActivity extends Activity {
         infoBarlp.gravity = android.view.Gravity.BOTTOM;
         mPlaybackInfoComponent.setLayoutParams(infoBarlp);
         rootView.addView(mPlaybackInfoComponent);
+
+        // Add channel switch overlay (居中显示台标+台名提示)
+        mSwitchOverlayComponent = new SwitchOverlayComponent(this);
+        FrameLayout.LayoutParams overlaylp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT);
+        mSwitchOverlayComponent.setLayoutParams(overlaylp);
+        rootView.addView(mSwitchOverlayComponent);
 
         // Setup channel change listener
         mChannelRepository.addListener(new ChannelRepository.OnChannelsChangedListener() {
@@ -365,6 +374,10 @@ public class MainActivity extends Activity {
                 // Show bottom playback info bar
                 if (mPlaybackInfoComponent != null) {
                     mPlaybackInfoComponent.showChannelInfo(channel);
+                }
+                // Show channel switch overlay if menu is not visible (直接按键切台时显示)
+                if (!mChannelListVisible && mSwitchOverlayComponent != null) {
+                    mSwitchOverlayComponent.showChannelSwitch(channel);
                 }
             });
             Log.d(TAG, "About to call mEpgManager.loadEpg for channel: " + channel.name);
