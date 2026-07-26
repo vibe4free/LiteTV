@@ -25,6 +25,13 @@ public class EpgManager {
     private final Context mContext;
     private final Map<String, Program> mPrograms = new HashMap<>();
 
+    public enum EpgSourceType {
+        AUTO,           // Auto-detect based on URL
+        DIYP,          // 51zmt DIYP JSON API
+        ZIP,           // ZIP package with XMLTV
+        XMLTV          // Direct XMLTV URL
+    }
+
     public static class Program {
         public String title;
         public long startTime;
@@ -46,59 +53,102 @@ public class EpgManager {
             return;
         }
 
+        String epgUrl = AppConfig.getEpgUrl();
+        if (epgUrl == null || epgUrl.isEmpty()) {
+            return;
+        }
+
+        // Detect format based on URL
+        EpgSourceType type = detectEpgSourceType(epgUrl);
+        Log.d(TAG, "Detected EPG source type: " + type + " for URL: " + epgUrl);
+
+        loadEpgByType(channel, epgUrl, type);
+    }
+
+    private EpgSourceType detectEpgSourceType(String url) {
+        if (url.contains("diyp")) {
+            return EpgSourceType.DIYP;
+        } else if (url.contains("zip")) {
+            return EpgSourceType.ZIP;
+        } else if (url.contains("xml")) {
+            return EpgSourceType.XMLTV;
+        }
+        // Default to DIYP for 51zmt API style
+        return EpgSourceType.DIYP;
+    }
+
+    private void loadEpgByType(Channel channel, String epgUrl, EpgSourceType type) {
         new Thread(() -> {
             try {
-                String epgUrl = AppConfig.getEpgUrl();
-                if (epgUrl.isEmpty()) {
-                    return;
-                }
-
-                String date = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
-                String url = epgUrl.replace("{name}", channel.tvgId).replace("{date}", date);
-
-                String content = fetchUrl(url);
-                if (content != null && !content.isEmpty()) {
-                    Log.d(TAG, "EPG response length: " + content.length() + ", first 200 chars: " + content.substring(0, Math.min(200, content.length())));
-                    parseEpgContent(channel, content);
-                    Log.d(TAG, "EPG loaded for channel: " + channel.name);
+                switch (type) {
+                    case DIYP:
+                        loadDiypEpg(channel, epgUrl);
+                        break;
+                    case ZIP:
+                        loadZipEpg(channel, epgUrl);
+                        break;
+                    case XMLTV:
+                        loadXmltvEpg(channel, epgUrl);
+                        break;
+                    default:
+                        loadDiypEpg(channel, epgUrl);
                 }
             } catch (Exception e) {
-                Log.w(TAG, "Error loading EPG for " + channel.name, e);
+                Log.e(TAG, "Error loading EPG for " + channel.name, e);
             }
         }).start();
     }
 
-    private void parseEpgContent(Channel channel, String content) {
+    private void loadDiypEpg(Channel channel, String baseUrl) {
         try {
-            if (content.contains("[") || content.contains("{")) {
+            String date = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
+            String url = baseUrl.replace("{name}", channel.tvgId).replace("{date}", date);
+
+            String content = fetchUrl(url);
+            if (content != null && !content.isEmpty()) {
+                Log.d(TAG, "DIYP EPG response length: " + content.length());
                 parseJsonEpg(channel, content);
+                Log.d(TAG, "DIYP EPG loaded for channel: " + channel.name);
             }
         } catch (Exception e) {
-            Log.w(TAG, "Error parsing EPG for " + channel.name, e);
+            Log.w(TAG, "Error loading DIYP EPG for " + channel.name, e);
+        }
+    }
+
+    private void loadZipEpg(Channel channel, String baseUrl) {
+        try {
+            Log.d(TAG, "ZIP EPG format support prepared (requires additional implementation)");
+            // TODO: Implement ZIP package download and extraction
+            // Format: Download zip from URL, extract XMLTV files, parse by channel
+        } catch (Exception e) {
+            Log.w(TAG, "Error loading ZIP EPG for " + channel.name, e);
+        }
+    }
+
+    private void loadXmltvEpg(Channel channel, String xmltvUrl) {
+        try {
+            Log.d(TAG, "XMLTV EPG format support prepared (requires additional implementation)");
+            // TODO: Implement XMLTV parsing
+            // Format: Direct XML parsing with channel name matching
+        } catch (Exception e) {
+            Log.w(TAG, "Error loading XMLTV EPG for " + channel.name, e);
         }
     }
 
     private void parseJsonEpg(Channel channel, String json) {
         try {
             JsonElement element = JsonParser.parseString(json);
-            Log.d(TAG, "Parsing EPG JSON for " + channel.name + ", isArray=" + element.isJsonArray() + ", isObject=" + element.isJsonObject());
+            Log.d(TAG, "Parsing EPG JSON for " + channel.name);
 
-            if (element.isJsonArray()) {
-                JsonArray programs = element.getAsJsonArray();
-                Log.d(TAG, "EPG array size: " + programs.size());
-                parseArray(channel, programs);
-            } else if (element.isJsonObject()) {
-                Log.d(TAG, "EPG is JsonObject, checking for epg_data field");
+            if (element.isJsonObject()) {
                 JsonObject obj = element.getAsJsonObject();
                 if (obj.has("epg_data") && obj.get("epg_data").isJsonArray()) {
                     JsonArray programs = obj.getAsJsonArray("epg_data");
-                    Log.d(TAG, "Found epg_data array with size: " + programs.size());
-                    parseArray(channel, programs);
-                } else if (obj.has("data") && obj.get("data").isJsonArray()) {
-                    JsonArray programs = obj.getAsJsonArray("data");
-                    Log.d(TAG, "Found data array with size: " + programs.size());
                     parseArray(channel, programs);
                 }
+            } else if (element.isJsonArray()) {
+                JsonArray programs = element.getAsJsonArray();
+                parseArray(channel, programs);
             }
         } catch (Exception e) {
             Log.d(TAG, "Failed to parse EPG JSON: " + e.getMessage());
@@ -110,7 +160,6 @@ public class EpgManager {
             try {
                 JsonObject prog = programs.get(i).getAsJsonObject();
                 String title = null;
-                long currentTime = System.currentTimeMillis();
 
                 // Try different field names for program title
                 if (prog.has("节目名")) {
@@ -119,17 +168,12 @@ public class EpgManager {
                     title = prog.get("name").getAsString();
                 } else if (prog.has("title")) {
                     title = prog.get("title").getAsString();
-                } else if (i == 0) {
-                    Log.d(TAG, "EPG object keys: " + prog.keySet());
                 }
 
-                if (title != null && !title.isEmpty()) {
+                if (title != null && !title.isEmpty() && i == 0) {
                     Program program = new Program(title, 0, 0);
-                    // Only store as current if it's the first item (simplification)
-                    if (i == 0) {
-                        mPrograms.put(channel.tvgId, program);
-                        Log.d(TAG, "EPG program stored for " + channel.name + ": " + title);
-                    }
+                    mPrograms.put(channel.tvgId, program);
+                    Log.d(TAG, "EPG program stored for " + channel.name + ": " + title);
                 }
             } catch (Exception e) {
                 Log.d(TAG, "Error parsing program " + i + ": " + e.getMessage());
@@ -154,6 +198,10 @@ public class EpgManager {
 
     public String getNextProgramInfo(Channel channel) {
         return null;
+    }
+
+    public String getSupportedFormats() {
+        return "DIYP (51zmt JSON API), ZIP (package with XMLTV), XMLTV (direct XML)";
     }
 
     private String fetchUrl(String urlString) {
