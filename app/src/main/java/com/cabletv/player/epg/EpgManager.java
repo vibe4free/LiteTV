@@ -23,6 +23,10 @@ import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.zip.GZIPInputStream;
@@ -34,7 +38,7 @@ import javax.xml.parsers.ParserConfigurationException;
 public class EpgManager {
     private static final String TAG = "EpgManager";
     private final Context mContext;
-    private final Map<String, Program> mPrograms = new HashMap<>();
+    private final Map<String, List<Program>> mProgramsByChannel = new HashMap<>();
 
     public enum EpgSourceType {
         AUTO,           // Auto-detect based on URL
@@ -78,6 +82,122 @@ public class EpgManager {
         Log.d(TAG, "Detected EPG source type: " + type + " for URL: " + epgUrl);
 
         loadEpgByType(channel, epgUrl, type);
+    }
+
+    public void preloadEpgForAllChannels(java.util.List<Channel> channels) {
+        if (channels == null || channels.isEmpty()) {
+            Log.d(TAG, "No channels to preload EPG for");
+            return;
+        }
+
+        Log.d(TAG, "Starting EPG preload for " + channels.size() + " channels");
+        String epgUrl = AppConfig.getEpgUrl();
+        if (epgUrl == null || epgUrl.isEmpty()) {
+            Log.d(TAG, "EPG URL is empty, cannot preload");
+            return;
+        }
+
+        EpgSourceType type = detectEpgSourceType(epgUrl);
+        if (type == EpgSourceType.XMLTV) {
+            // For XMLTV, we can load all channels at once
+            loadAllXmltvEpg(channels, epgUrl);
+        } else {
+            // For other formats, load each channel individually
+            for (Channel channel : channels) {
+                if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
+                    loadEpgByType(channel, epgUrl, type);
+                }
+            }
+        }
+
+        AppConfig.setEpgLastUpdateTime(System.currentTimeMillis());
+        Log.d(TAG, "EPG preload completed at " + System.currentTimeMillis());
+    }
+
+    private void loadAllXmltvEpg(java.util.List<Channel> channels, String xmltvUrl) {
+        new Thread(() -> {
+            try {
+                byte[] data = fetchUrlAsBytes(xmltvUrl);
+                if (data == null) {
+                    Log.e(TAG, "Failed to fetch XMLTV data");
+                    return;
+                }
+
+                if (isGzipCompressed(data)) {
+                    Log.d(TAG, "Content is gzip compressed, decompressing...");
+                    String decompressed = decompressGzip(data);
+                    data = decompressed.getBytes("UTF-8");
+                }
+
+                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                DocumentBuilder builder = factory.newDocumentBuilder();
+                Document doc = builder.parse(new java.io.ByteArrayInputStream(data));
+
+                Log.d(TAG, "Parsing XMLTV EPG for all channels");
+                for (Channel channel : channels) {
+                    if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
+                        parseXmltvEpgFromDocument(channel, doc);
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error loading all XMLTV EPG: " + e.getMessage(), e);
+            }
+        }).start();
+    }
+
+    private void parseXmltvEpgFromDocument(Channel channel, Document doc) {
+        try {
+            Log.d(TAG, "parseXmltvEpgFromDocument: Starting for " + channel.name + ", tvgId=" + channel.tvgId);
+
+            String channelId = findChannelIdByName(doc, channel);
+            if (channelId == null) {
+                Log.w(TAG, "Channel not found in XMLTV for: " + channel.name + " (tvgId: " + channel.tvgId + ")");
+                return;
+            }
+
+            Log.d(TAG, "Found channel ID: " + channelId + " for channel: " + channel.name);
+
+            NodeList programmes = doc.getElementsByTagName("programme");
+            long currentTime = System.currentTimeMillis();
+
+            List<Program> programList = new ArrayList<>();
+            int matchedCount = 0;
+            for (int i = 0; i < programmes.getLength(); i++) {
+                Element prog = (Element) programmes.item(i);
+                String progChannel = prog.getAttribute("channel");
+
+                if (!progChannel.equals(channelId)) {
+                    continue;
+                }
+
+                matchedCount++;
+
+                try {
+                    long startTime = parseXmltvTime(prog.getAttribute("start"));
+                    long stopTime = parseXmltvTime(prog.getAttribute("stop"));
+
+                    String title = "";
+                    NodeList titleNodes = prog.getElementsByTagName("title");
+                    if (titleNodes.getLength() > 0) {
+                        title = titleNodes.item(0).getTextContent();
+                    }
+
+                    if (title != null && !title.isEmpty()) {
+                        Program program = new Program(title, startTime, stopTime);
+                        programList.add(program);
+                    }
+                } catch (Exception e) {
+                    Log.d(TAG, "Error parsing programme " + i + ": " + e.getMessage());
+                }
+            }
+
+            if (!programList.isEmpty()) {
+                mProgramsByChannel.put(channel.tvgId, programList);
+                Log.d(TAG, "Stored " + programList.size() + " programs for " + channel.name);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing XMLTV EPG from document: " + e.getMessage(), e);
+        }
     }
 
     private EpgSourceType detectEpgSourceType(String url) {
@@ -190,7 +310,8 @@ public class EpgManager {
     }
 
     private void parseArray(Channel channel, JsonArray programs) {
-        for (int i = 0; i < Math.min(programs.size(), 5); i++) {
+        List<Program> programList = new ArrayList<>();
+        for (int i = 0; i < programs.size(); i++) {
             try {
                 JsonObject prog = programs.get(i).getAsJsonObject();
                 String title = null;
@@ -204,14 +325,18 @@ public class EpgManager {
                     title = prog.get("title").getAsString();
                 }
 
-                if (title != null && !title.isEmpty() && i == 0) {
+                if (title != null && !title.isEmpty()) {
                     Program program = new Program(title, 0, 0);
-                    mPrograms.put(channel.tvgId, program);
-                    Log.d(TAG, "EPG program stored for " + channel.name + ": " + title);
+                    programList.add(program);
                 }
             } catch (Exception e) {
                 Log.d(TAG, "Error parsing program " + i + ": " + e.getMessage());
             }
+        }
+
+        if (!programList.isEmpty()) {
+            mProgramsByChannel.put(channel.tvgId, programList);
+            Log.d(TAG, "Stored " + programList.size() + " programs for " + channel.name);
         }
     }
 
@@ -219,7 +344,30 @@ public class EpgManager {
         if (channel == null) {
             return null;
         }
-        return mPrograms.get(channel.tvgId);
+        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
+        if (programs == null || programs.isEmpty()) {
+            return null;
+        }
+        return programs.get(0);
+    }
+
+    public Program getNextProgram(Channel channel) {
+        if (channel == null) {
+            return null;
+        }
+        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
+        if (programs == null || programs.size() < 2) {
+            return null;
+        }
+        return programs.get(1);
+    }
+
+    public List<Program> getAllPrograms(Channel channel) {
+        if (channel == null) {
+            return new ArrayList<>();
+        }
+        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
+        return programs != null ? programs : new ArrayList<>();
     }
 
     public String getCurrentProgramInfo(Channel channel) {
@@ -231,7 +379,30 @@ public class EpgManager {
     }
 
     public String getNextProgramInfo(Channel channel) {
+        Program program = getNextProgram(channel);
+        if (program != null) {
+            return program.title;
+        }
         return null;
+    }
+
+    public Program getCurrentProgramWithTime(Channel channel) {
+        if (channel == null) {
+            return null;
+        }
+        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
+        if (programs == null || programs.isEmpty()) {
+            return null;
+        }
+
+        long currentTime = System.currentTimeMillis();
+        for (Program program : programs) {
+            if (currentTime >= program.startTime && currentTime < program.endTime) {
+                return program;
+            }
+        }
+
+        return programs.get(0);
     }
 
     public String getSupportedFormats() {
@@ -346,6 +517,7 @@ public class EpgManager {
             NodeList programmes = doc.getElementsByTagName("programme");
             Log.d(TAG, "Total programmes in XMLTV: " + programmes.getLength());
 
+            List<Program> programList = new ArrayList<>();
             int matchedCount = 0;
             for (int i = 0; i < programmes.getLength(); i++) {
                 Element prog = (Element) programmes.item(i);
@@ -361,26 +533,30 @@ public class EpgManager {
                     long startTime = parseXmltvTime(prog.getAttribute("start"));
                     long stopTime = parseXmltvTime(prog.getAttribute("stop"));
 
-                    if (currentTime >= startTime && currentTime < stopTime) {
-                        String title = "";
-                        NodeList titleNodes = prog.getElementsByTagName("title");
-                        if (titleNodes.getLength() > 0) {
-                            title = titleNodes.item(0).getTextContent();
-                        }
+                    String title = "";
+                    NodeList titleNodes = prog.getElementsByTagName("title");
+                    if (titleNodes.getLength() > 0) {
+                        title = titleNodes.item(0).getTextContent();
+                    }
 
-                        if (title != null && !title.isEmpty()) {
-                            Program program = new Program(title, startTime, stopTime);
-                            mPrograms.put(channel.tvgId, program);
+                    if (title != null && !title.isEmpty()) {
+                        Program program = new Program(title, startTime, stopTime);
+                        programList.add(program);
+                        if (currentTime >= startTime && currentTime < stopTime) {
                             Log.d(TAG, "✓ XMLTV program matched for " + channel.name + ": " + title);
                         }
-                        return;
                     }
                 } catch (Exception e) {
                     Log.d(TAG, "Error parsing programme " + i + ": " + e.getMessage());
                 }
             }
 
-            Log.w(TAG, "No matching programme found for current time in channel: " + channel.name + " (checked " + matchedCount + " programmes for this channel)");
+            if (!programList.isEmpty()) {
+                mProgramsByChannel.put(channel.tvgId, programList);
+                Log.d(TAG, "Stored " + programList.size() + " programs for " + channel.name);
+            } else {
+                Log.w(TAG, "No programmes found for current time in channel: " + channel.name + " (checked " + matchedCount + " programmes for this channel)");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error parsing XMLTV EPG: " + e.getMessage(), e);
             e.printStackTrace();

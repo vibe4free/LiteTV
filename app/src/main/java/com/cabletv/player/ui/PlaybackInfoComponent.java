@@ -120,22 +120,40 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
             if (mNextProgramView != null) {
                 mNextProgramView.setText("");
             }
+            if (mProgressBar != null) {
+                mProgressBar.setProgress(0);
+                mProgressBar.setMax(100);
+            }
             return;
         }
 
-        String currentProgram = mEpgManager.getCurrentProgramInfo(mCurrentChannel);
-        if (mCurrentProgramView != null) {
-            mCurrentProgramView.setText(currentProgram != null ? currentProgram : "No EPG data");
+        EpgManager.Program currentProgram = mEpgManager.getCurrentProgramWithTime(mCurrentChannel);
+        if (currentProgram != null && mCurrentProgramView != null) {
+            mCurrentProgramView.setText(currentProgram.title);
+
+            // Update progress bar based on program duration
+            if (mProgressBar != null && currentProgram.startTime > 0 && currentProgram.endTime > 0) {
+                long duration = currentProgram.endTime - currentProgram.startTime;
+                long elapsed = System.currentTimeMillis() - currentProgram.startTime;
+
+                if (duration > 0) {
+                    int progress = (int) ((elapsed * 100) / duration);
+                    mProgressBar.setMax(100);
+                    mProgressBar.setProgress(Math.max(0, Math.min(100, progress)));
+                } else {
+                    mProgressBar.setProgress(0);
+                }
+            }
+        } else if (mCurrentProgramView != null) {
+            mCurrentProgramView.setText("No EPG data");
+            if (mProgressBar != null) {
+                mProgressBar.setProgress(0);
+            }
         }
 
         String nextProgram = mEpgManager.getNextProgramInfo(mCurrentChannel);
         if (mNextProgramView != null) {
             mNextProgramView.setText(nextProgram != null ? "Next: " + nextProgram : "");
-        }
-
-        // Update progress bar (placeholder for now)
-        if (mProgressBar != null) {
-            mProgressBar.setProgress(50);
         }
     }
 

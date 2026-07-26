@@ -88,6 +88,20 @@ public class MainActivity extends Activity {
 
         mChannelRepository.reload();
 
+        // Check EPG cache and preload if needed
+        if (!AppConfig.isEpgCacheValid()) {
+            Log.d(TAG, "EPG cache is stale or missing, preloading...");
+            new Thread(() -> {
+                java.util.List<Channel> allChannels = mChannelRepository.getAllChannels();
+                if (allChannels != null && !allChannels.isEmpty()) {
+                    mEpgManager.preloadEpgForAllChannels(allChannels);
+                    Log.d(TAG, "EPG preload completed");
+                }
+            }).start();
+        } else {
+            Log.d(TAG, "EPG cache is still valid");
+        }
+
         // Set up audio manager for volume control
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
@@ -105,7 +119,8 @@ public class MainActivity extends Activity {
                 @Override
                 public void onEpgUrlChanged(String newUrl) {
                     Log.d(TAG, "EPG URL changed: " + newUrl);
-                    // EPG is loaded dynamically when playing channels, no need to reload all
+                    // Invalidate EPG cache to force refresh on next app start
+                    AppConfig.setEpgLastUpdateTime(0);
                 }
             });
         }
