@@ -145,21 +145,28 @@ public class MainActivity extends Activity {
         }
         mLastChannelSwitchTime = now;
 
+        boolean swapped = AppConfig.isChannelUpDownSwapped();
+
         if (mChannelListVisible && mChannelListComponent != null) {
-            // When channel list is visible, select previous channel
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
-            Log.d(TAG, "Channel UP - list visible, current selected=" + selected + ", count=" + count);
             if (count > 0) {
-                selected = (selected + 1) % count;
-                Log.d(TAG, "Channel UP - new selected=" + selected);
+                // If swapped: UP means previous (index-1), else next (index+1)
+                if (swapped) {
+                    selected = (selected - 1 + count) % count;
+                } else {
+                    selected = (selected + 1) % count;
+                }
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
-            // Direct channel switch when list is not visible
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
+                if (swapped) {
+                    mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
+                } else {
+                    mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
+                }
                 playChannel(mCurrentChannelIndex);
             }
         }
@@ -172,21 +179,28 @@ public class MainActivity extends Activity {
         }
         mLastChannelSwitchTime = now;
 
+        boolean swapped = AppConfig.isChannelUpDownSwapped();
+
         if (mChannelListVisible && mChannelListComponent != null) {
-            // When channel list is visible, select next channel
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
-            Log.d(TAG, "Channel DOWN - list visible, current selected=" + selected + ", count=" + count);
             if (count > 0) {
-                selected = (selected - 1 + count) % count;
-                Log.d(TAG, "Channel DOWN - new selected=" + selected);
+                // If swapped: DOWN means next (index+1), else previous (index-1)
+                if (swapped) {
+                    selected = (selected + 1) % count;
+                } else {
+                    selected = (selected - 1 + count) % count;
+                }
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
-            // Direct channel switch when list is not visible
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
+                if (swapped) {
+                    mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
+                } else {
+                    mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
+                }
                 playChannel(mCurrentChannelIndex);
             }
         }

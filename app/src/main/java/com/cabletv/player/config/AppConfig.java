@@ -12,6 +12,7 @@ public class AppConfig {
     private static final String SIDEBAR_ALPHA_KEY = "app_sidebar_alpha";
     private static final String M3U_FILE_PATH_KEY = "app_m3u_file_path";
     private static final String EPG_DISPLAY_KEY = "app_epg_display_enabled";
+    private static final String CHANNEL_UP_DOWN_SWAP_KEY = "app_channel_up_down_swap";
 
     private static final String DEFAULT_EPG_URL = "";
     private static final int DEFAULT_WEB_SERVER_PORT = 8899;
@@ -77,5 +78,14 @@ public class AppConfig {
 
     public static void setEpgDisplayEnabled(boolean enabled) {
         Hawk.put(EPG_DISPLAY_KEY, enabled);
+    }
+
+    // Channel up/down swap toggle
+    public static boolean isChannelUpDownSwapped() {
+        return Hawk.get(CHANNEL_UP_DOWN_SWAP_KEY, false);  // Default: not swapped
+    }
+
+    public static void setChannelUpDownSwapped(boolean swapped) {
+        Hawk.put(CHANNEL_UP_DOWN_SWAP_KEY, swapped);
     }
 }

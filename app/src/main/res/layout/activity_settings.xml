@@ -141,6 +141,49 @@
                     android:layout_height="wrap_content"
                     android:text="Save" />
 
+                <CheckBox
+                    android:id="@+id/epg_display_toggle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Show EPG in channel list"
+                    android:textColor="@color/text_primary"
+                    android:layout_marginTop="8dp" />
+
+            </LinearLayout>
+
+            <!-- Channel Control Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/settings_section_bg">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Channel Control"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <CheckBox
+                    android:id="@+id/channel_up_down_swap_toggle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Swap UP/DOWN in channel list"
+                    android:textColor="@color/text_primary"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="When enabled: UP=previous, DOWN=next"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
             </LinearLayout>
 
         </LinearLayout>

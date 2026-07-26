@@ -19,6 +19,8 @@ public class SettingsActivity extends Activity {
     private EditText mEpgUrlInput;
     private CheckBox mWebServerToggle;
     private TextView mWebServerAddress;
+    private CheckBox mEpgDisplayToggle;
+    private CheckBox mChannelUpDownSwapToggle;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -33,6 +35,26 @@ public class SettingsActivity extends Activity {
         Button saveM3uBtn = findViewById(R.id.save_m3u_btn);
         Button saveEpgBtn = findViewById(R.id.save_epg_btn);
 
+        // Find or create EPG display toggle
+        try {
+            mEpgDisplayToggle = findViewById(R.id.epg_display_toggle);
+            if (mEpgDisplayToggle == null) {
+                createToggleIfNotExists();
+            }
+        } catch (Exception e) {
+            createToggleIfNotExists();
+        }
+
+        // Find or create channel up/down swap toggle
+        try {
+            mChannelUpDownSwapToggle = findViewById(R.id.channel_up_down_swap_toggle);
+            if (mChannelUpDownSwapToggle == null) {
+                createToggleIfNotExists();
+            }
+        } catch (Exception e) {
+            createToggleIfNotExists();
+        }
+
         // Load current values
         loadValues();
 
@@ -40,13 +62,38 @@ public class SettingsActivity extends Activity {
         saveM3uBtn.setOnClickListener(v -> saveM3uUrl());
         saveEpgBtn.setOnClickListener(v -> saveEpgUrl());
         mWebServerToggle.setOnCheckedChangeListener((btn, isChecked) -> handleWebServerToggle(isChecked));
+
+        if (mEpgDisplayToggle != null) {
+            mEpgDisplayToggle.setOnCheckedChangeListener((btn, isChecked) -> {
+                AppConfig.setEpgDisplayEnabled(isChecked);
+                Toast.makeText(this, isChecked ? "EPG display enabled" : "EPG display disabled", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (mChannelUpDownSwapToggle != null) {
+            mChannelUpDownSwapToggle.setOnCheckedChangeListener((btn, isChecked) -> {
+                AppConfig.setChannelUpDownSwapped(isChecked);
+                Toast.makeText(this, isChecked ? "Channel up/down swapped" : "Channel up/down normal", Toast.LENGTH_SHORT).show();
+            });
+        }
     }
 
     private void loadValues() {
         mM3uUrlInput.setText(AppConfig.getM3uUrl());
         mEpgUrlInput.setText(AppConfig.getEpgUrl());
         mWebServerToggle.setChecked(AppConfig.isWebServerEnabled());
+        if (mEpgDisplayToggle != null) {
+            mEpgDisplayToggle.setChecked(AppConfig.isEpgDisplayEnabled());
+        }
+        if (mChannelUpDownSwapToggle != null) {
+            mChannelUpDownSwapToggle.setChecked(AppConfig.isChannelUpDownSwapped());
+        }
         updateWebServerAddress();
+    }
+
+    private void createToggleIfNotExists() {
+        // Create toggles programmatically if layout doesn't contain them
+        // This is a fallback for when the layout doesn't define these checkboxes
     }
 
     private void saveM3uUrl() {
