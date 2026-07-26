@@ -94,6 +94,20 @@ public class MainActivity extends Activity {
         // Start web server for remote configuration
         if (AppConfig.isWebServerEnabled()) {
             ConfigWebServer.startServer(this);
+            // Set up callback for configuration changes
+            ConfigWebServer.setConfigChangeListener(new ConfigWebServer.OnConfigChangeListener() {
+                @Override
+                public void onM3uUrlChanged(String newUrl) {
+                    Log.d(TAG, "M3U URL changed, reloading channels: " + newUrl);
+                    mChannelRepository.reload();
+                }
+
+                @Override
+                public void onEpgUrlChanged(String newUrl) {
+                    Log.d(TAG, "EPG URL changed: " + newUrl);
+                    // EPG is loaded dynamically when playing channels, no need to reload all
+                }
+            });
         }
     }
 

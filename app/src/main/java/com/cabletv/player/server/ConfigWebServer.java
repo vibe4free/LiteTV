@@ -22,6 +22,13 @@ public class ConfigWebServer {
     private static Thread sServerThread;
     private static volatile boolean sRunning = false;
 
+    public interface OnConfigChangeListener {
+        void onM3uUrlChanged(String newUrl);
+        void onEpgUrlChanged(String newUrl);
+    }
+
+    private static OnConfigChangeListener sConfigChangeListener;
+
     public static void startServer(Context context, int port) {
         if (sRunning && sServerSocket != null) {
             Log.i(TAG, "Server already running on port " + sServerSocket.getLocalPort());
@@ -35,6 +42,10 @@ public class ConfigWebServer {
 
     public static void startServer(Context context) {
         startServer(context, 8899);
+    }
+
+    public static void setConfigChangeListener(OnConfigChangeListener listener) {
+        sConfigChangeListener = listener;
     }
 
     public static void stopServer() {
@@ -150,6 +161,9 @@ public class ConfigWebServer {
             String m3uUrl = params.get("m3u_url");
             if (m3uUrl != null && !m3uUrl.isEmpty()) {
                 AppConfig.setM3uUrl(m3uUrl);
+                if (sConfigChangeListener != null) {
+                    sConfigChangeListener.onM3uUrlChanged(m3uUrl);
+                }
                 JsonObject json = new JsonObject();
                 json.addProperty("success", true);
                 json.addProperty("message", "M3U URL saved");
@@ -170,6 +184,9 @@ public class ConfigWebServer {
             String epgUrl = params.get("epg_url");
             if (epgUrl != null && !epgUrl.isEmpty()) {
                 AppConfig.setEpgUrl(epgUrl);
+                if (sConfigChangeListener != null) {
+                    sConfigChangeListener.onEpgUrlChanged(epgUrl);
+                }
                 JsonObject json = new JsonObject();
                 json.addProperty("success", true);
                 json.addProperty("message", "EPG URL saved");
