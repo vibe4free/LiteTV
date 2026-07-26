@@ -49,7 +49,8 @@ public class ConfigWebServer {
         void onEpgUrlChanged(String newUrl);
     }
 
-    private static OnConfigChangeListener sConfigChangeListener;
+    /** Cleared by the Activity in onDestroy(); volatile because server threads read it. */
+    private static volatile OnConfigChangeListener sConfigChangeListener;
 
     public static synchronized void startServer(Context context, int port) {
         if (sRunning) {
@@ -326,8 +327,9 @@ public class ConfigWebServer {
             String m3uUrl = params.get("m3u_url");
             if (m3uUrl != null && !m3uUrl.isEmpty()) {
                 AppConfig.setM3uUrl(m3uUrl);
-                if (sConfigChangeListener != null) {
-                    sConfigChangeListener.onM3uUrlChanged(m3uUrl);
+                OnConfigChangeListener listener = sConfigChangeListener;
+                if (listener != null) {
+                    listener.onM3uUrlChanged(m3uUrl);
                 }
                 JsonObject json = new JsonObject();
                 json.addProperty("success", true);
@@ -349,8 +351,9 @@ public class ConfigWebServer {
             String epgUrl = params.get("epg_url");
             if (epgUrl != null && !epgUrl.isEmpty()) {
                 AppConfig.setEpgUrl(epgUrl);
-                if (sConfigChangeListener != null) {
-                    sConfigChangeListener.onEpgUrlChanged(epgUrl);
+                OnConfigChangeListener listener = sConfigChangeListener;
+                if (listener != null) {
+                    listener.onEpgUrlChanged(epgUrl);
                 }
                 JsonObject json = new JsonObject();
                 json.addProperty("success", true);

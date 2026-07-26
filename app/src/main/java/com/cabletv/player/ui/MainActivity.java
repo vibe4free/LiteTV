@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.media.AudioManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.widget.FrameLayout;
@@ -26,11 +28,20 @@ public class MainActivity extends Activity {
     private EpgManager mEpgManager;
     private ChannelListComponent mChannelListComponent;
     private PlaybackInfoComponent mPlaybackInfoComponent;
+    private PlaybackStatusView mPlaybackStatusView;
+    private ChannelRepository.OnChannelsChangedListener mChannelsChangedListener;
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
     private boolean mChannelListVisible = false;
     private boolean mIsInitialLoad = true;
     private static final long CHANNEL_SWITCH_DEBOUNCE_MS = 250;
+
+    /** Backoff between reconnect attempts; its length is also the attempt limit. */
+    private static final long[] RECONNECT_DELAYS_MS = {1_000, 2_000, 4_000, 8_000, 15_000};
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mReconnectRunnable = this::reconnectCurrentChannel;
+    private int mReconnectAttempt = 0;
+    private boolean mDestroyed = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -69,15 +80,23 @@ public class MainActivity extends Activity {
         mPlaybackInfoComponent.setLayoutParams(infoBarlp);
         rootView.addView(mPlaybackInfoComponent);
 
-        // Setup channel change listener
-        mChannelRepository.addListener(new ChannelRepository.OnChannelsChangedListener() {
+        // Centred status message for buffering / reconnect / playback failure
+        mPlaybackStatusView = new PlaybackStatusView(this);
+        rootView.addView(mPlaybackStatusView, mPlaybackStatusView.createCenteredLayoutParams());
+
+        // Surface playback failures and reconnect automatically instead of showing a black screen
+        mVideoView.addOnStateChangeListener(new VideoView.SimpleOnStateChangeListener() {
+            @Override
+            public void onPlayStateChanged(int playState) {
+                handlePlayStateChanged(playState);
+            }
+        });
+
+        // Setup channel change listener (always called on the main thread)
+        mChannelsChangedListener = new ChannelRepository.OnChannelsChangedListener() {
             @Override
             public void onChannelsChanged(java.util.List<com.cabletv.player.model.ChannelGroup> channels) {
                 Log.i(TAG, "Channels updated: " + channels.size());
-                if (mChannelListComponent != null) {
-                    mChannelListComponent.updateChannels(
-                            mChannelRepository.getAllChannels(), mCurrentChannelIndex);
-                }
                 // On initial load, try to resume last played channel; on subsequent reloads, reset to first
                 if (mIsInitialLoad) {
                     mIsInitialLoad = false;
@@ -87,9 +106,15 @@ public class MainActivity extends Activity {
                     mCurrentChannelIndex = 0;
                     Log.d(TAG, "Subsequent reload: resetting to first channel");
                 }
-                playChannel(mCurrentChannelIndex);
-
-                // Trigger EPG bulk preload now that channels are truly available (no race with reload())
+                // Refresh the list after the index is known, so the highlight matches what plays
+                if (mChannelListComponent != null) {
+                    mChannelListComponent.updateChannels(
+                            mChannelRepository.getAllChannels(), mCurrentChannelIndex);
+                }
+                // Trigger EPG bulk preload now that channels are truly available (no race with
+                // reload()). It runs before playChannel() on purpose: the preload marks itself as
+                // running synchronously, so the per-channel load below sees it and does not
+                // download the same feed a second time.
                 if (!AppConfig.isEpgCacheValid()) {
                     java.util.List<Channel> allChannels = mChannelRepository.getAllChannels();
                     if (allChannels != null && !allChannels.isEmpty()) {
@@ -97,7 +122,20 @@ public class MainActivity extends Activity {
                         mEpgManager.preloadEpgForAllChannels(allChannels);
                     }
                 }
+                playChannel(mCurrentChannelIndex);
             }
+        };
+        mChannelRepository.addListener(mChannelsChangedListener);
+
+        // Tell the user when the playlist cannot be loaded or refreshed
+        mChannelRepository.setOnLoadFailedListener((reason, servedFromCache) -> {
+            Log.w(TAG, "Playlist load failed: " + reason + ", servedFromCache=" + servedFromCache);
+            android.widget.Toast.makeText(MainActivity.this,
+                    getString(servedFromCache
+                                    ? R.string.playlist_load_failed_cached
+                                    : R.string.playlist_load_failed,
+                            reason),
+                    android.widget.Toast.LENGTH_LONG).show();
         });
 
         // Load channels from the configured source; guide the user if there is none yet.
@@ -366,6 +404,8 @@ public class MainActivity extends Activity {
 
     private void playChannel(int index) {
         Log.d(TAG, "playChannel called with index: " + index);
+        // A deliberate channel change cancels any pending reconnect for the previous channel
+        cancelReconnect();
         Channel channel = mChannelRepository.getChannel(index);
         Log.d(TAG, "Got channel from repository: " + (channel != null ? channel.name : "null"));
         if (channel != null) {
@@ -391,6 +431,77 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void handlePlayStateChanged(int playState) {
+        Log.d(TAG, "Play state changed: " + playState);
+        switch (playState) {
+            case VideoView.STATE_PLAYING:
+            case VideoView.STATE_BUFFERED:
+                // Stream is alive again: drop the backoff and clear the message
+                cancelReconnect();
+                break;
+            case VideoView.STATE_PREPARING:
+            case VideoView.STATE_BUFFERING:
+                if (mReconnectAttempt == 0) {
+                    // Don't overwrite the reconnect countdown with a plain "buffering"
+                    mPlaybackStatusView.showMessage(getString(R.string.playback_buffering));
+                }
+                break;
+            case VideoView.STATE_ERROR:
+            case VideoView.STATE_PLAYBACK_COMPLETED:
+                // Live streams should never complete; when they do, the source dropped us.
+                scheduleReconnect();
+                break;
+            default:
+                break;
+        }
+    }
+
+    private void scheduleReconnect() {
+        if (mDestroyed) {
+            return;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null) {
+            return;
+        }
+        if (mReconnectAttempt >= RECONNECT_DELAYS_MS.length) {
+            Log.w(TAG, "Giving up on " + channel.name + " after " + mReconnectAttempt + " attempts");
+            mPlaybackStatusView.showMessage(getString(R.string.playback_failed, channel.name));
+            return;
+        }
+        long delay = RECONNECT_DELAYS_MS[mReconnectAttempt];
+        mReconnectAttempt++;
+        mPlaybackStatusView.showMessage(getString(R.string.playback_reconnecting,
+                mReconnectAttempt, RECONNECT_DELAYS_MS.length));
+        Log.w(TAG, "Scheduling reconnect " + mReconnectAttempt + "/" + RECONNECT_DELAYS_MS.length
+                + " for " + channel.name + " in " + delay + "ms");
+        mMainHandler.removeCallbacks(mReconnectRunnable);
+        mMainHandler.postDelayed(mReconnectRunnable, delay);
+    }
+
+    private void reconnectCurrentChannel() {
+        if (mDestroyed || mVideoView == null) {
+            return;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null) {
+            return;
+        }
+        Log.i(TAG, "Reconnect attempt " + mReconnectAttempt + " for " + channel.name);
+        // Rebuild the player: after an error the existing instance cannot be reused
+        mVideoView.release();
+        mVideoView.setUrl(channel.url, channel.headers);
+        mVideoView.start();
+    }
+
+    private void cancelReconnect() {
+        mReconnectAttempt = 0;
+        mMainHandler.removeCallbacks(mReconnectRunnable);
+        if (mPlaybackStatusView != null) {
+            mPlaybackStatusView.hideMessage();
+        }
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -409,11 +520,22 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        mDestroyed = true;
+        mMainHandler.removeCallbacks(mReconnectRunnable);
+        // The web server keeps its listener in a static field; leaving ours there would leak
+        // this Activity for the whole process lifetime.
+        ConfigWebServer.setConfigChangeListener(null);
+        ConfigWebServer.stopServer();
+        if (mChannelsChangedListener != null) {
+            mChannelRepository.removeListener(mChannelsChangedListener);
+            mChannelsChangedListener = null;
+        }
+        mChannelRepository.clearListeners();
+        mEpgManager.setOnEpgUpdatedListener(null);
         if (mVideoView != null) {
             mVideoView.release();
         }
-        ConfigWebServer.stopServer();
+        super.onDestroy();
     }
 
     private int dp2px(int dp) {

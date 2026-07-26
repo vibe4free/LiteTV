@@ -133,7 +133,15 @@ public class EpgManager {
         loadEpgByType(channel, epgUrl, type);
     }
 
+    /**
+     * Reads the cached EPG in the background; listeners are notified once it is in memory.
+     * The cache can be several MB, so it must never be parsed on the main thread.
+     */
     public void loadFromCache() {
+        new Thread(this::loadFromCacheBlocking, "epg-cache-load").start();
+    }
+
+    private void loadFromCacheBlocking() {
         Log.d(TAG, "Loading EPG from cache file...");
         Map<String, List<Program>> cached = mCache.loadPrograms();
         if (cached != null && !cached.isEmpty()) {
@@ -151,74 +159,81 @@ public class EpgManager {
             return;
         }
 
-        Log.d(TAG, "Starting EPG preload for " + channels.size() + " channels");
-        String epgUrl = AppConfig.getEpgUrl();
+        final String epgUrl = AppConfig.getEpgUrl();
         if (epgUrl == null || epgUrl.isEmpty()) {
             Log.d(TAG, "EPG URL is empty, cannot preload");
             return;
         }
 
-        // Check if cache has today's EPG version
-        if (mCache.isCacheTodayVersion()) {
-            Log.d(TAG, "Using cached EPG data from today, skipping download");
-            loadFromCache();
-            return;
-        }
-
-        Log.d(TAG, "EPG cache outdated or missing, downloading new data");
-        EpgSourceType type = detectEpgSourceType(epgUrl);
-        if (type == EpgSourceType.XMLTV) {
-            // For XMLTV, we can load all channels at once
-            loadAllXmltvEpg(channels, epgUrl);
-        } else {
-            // For other formats, load each channel individually
-            for (Channel channel : channels) {
-                if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
-                    loadEpgByType(channel, epgUrl, type);
-                }
-            }
-        }
-
-        Log.d(TAG, "EPG preload initiated at " + System.currentTimeMillis());
-    }
-
-    private void loadAllXmltvEpg(java.util.List<Channel> channels, String xmltvUrl) {
+        Log.d(TAG, "Starting EPG preload for " + channels.size() + " channels");
+        // Claim the bulk load before going async, otherwise the per-channel load kicked off by
+        // the first playChannel() would fetch the very same feed a second time.
         mBulkLoadInProgress = true;
+        final java.util.List<Channel> snapshot = new ArrayList<>(channels);
         new Thread(() -> {
             try {
-                byte[] data = fetchUrlAsBytes(xmltvUrl);
-                if (data == null) {
-                    Log.e(TAG, "Failed to fetch XMLTV data");
+                // Freshness check and cache read are both file IO; they belong here, not on the
+                // caller's thread (which is now the main thread).
+                if (mCache.isCacheTodayVersion()) {
+                    Log.d(TAG, "Using cached EPG data from today, skipping download");
+                    loadFromCacheBlocking();
                     return;
                 }
 
-                if (isGzipCompressed(data)) {
-                    Log.d(TAG, "Content is gzip compressed, decompressing...");
-                    String decompressed = decompressGzip(data);
-                    data = decompressed.getBytes("UTF-8");
-                }
-
-                Document doc = parseXmlSafely(data);
-
-                Log.d(TAG, "Parsing XMLTV EPG for all channels");
-                for (Channel channel : channels) {
-                    if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
-                        parseXmltvEpgFromDocument(channel, doc);
+                Log.d(TAG, "EPG cache outdated or missing, downloading new data");
+                EpgSourceType type = detectEpgSourceType(epgUrl);
+                if (type == EpgSourceType.XMLTV) {
+                    // For XMLTV, we can load all channels from a single download
+                    loadAllXmltvEpgBlocking(snapshot, epgUrl);
+                } else {
+                    // For other formats, load each channel individually
+                    for (Channel channel : snapshot) {
+                        if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
+                            loadEpgByType(channel, epgUrl, type);
+                        }
                     }
                 }
-
-                // Save EPG to cache after loading all channels
-                mCache.savePrograms(mProgramsByChannel);
-                AppConfig.setEpgLastUpdateTime(System.currentTimeMillis());
-                Log.d(TAG, "✓ EPG cache saved successfully");
             } catch (Exception e) {
-                Log.e(TAG, "Error loading all XMLTV EPG: " + e.getMessage(), e);
+                Log.e(TAG, "Error during EPG preload: " + e.getMessage(), e);
             } finally {
                 mBulkLoadInProgress = false;
                 notifyEpgUpdated();
-                Log.d(TAG, "Bulk EPG load completed, notifying listeners");
+                Log.d(TAG, "EPG preload finished, notifying listeners");
             }
-        }).start();
+        }, "epg-preload").start();
+    }
+
+    /** Runs on the caller's thread; only called from the preload worker. */
+    private void loadAllXmltvEpgBlocking(java.util.List<Channel> channels, String xmltvUrl) {
+        try {
+            byte[] data = fetchUrlAsBytes(xmltvUrl);
+            if (data == null) {
+                Log.e(TAG, "Failed to fetch XMLTV data");
+                return;
+            }
+
+            if (isGzipCompressed(data)) {
+                Log.d(TAG, "Content is gzip compressed, decompressing...");
+                String decompressed = decompressGzip(data);
+                data = decompressed.getBytes("UTF-8");
+            }
+
+            Document doc = parseXmlSafely(data);
+
+            Log.d(TAG, "Parsing XMLTV EPG for all channels");
+            for (Channel channel : channels) {
+                if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
+                    parseXmltvEpgFromDocument(channel, doc);
+                }
+            }
+
+            // Save EPG to cache after loading all channels
+            mCache.savePrograms(mProgramsByChannel);
+            AppConfig.setEpgLastUpdateTime(System.currentTimeMillis());
+            Log.d(TAG, "✓ EPG cache saved successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading all XMLTV EPG: " + e.getMessage(), e);
+        }
     }
 
     private void parseXmltvEpgFromDocument(Channel channel, Document doc) {

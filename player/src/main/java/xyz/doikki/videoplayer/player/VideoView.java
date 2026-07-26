@@ -698,7 +698,12 @@ public class VideoView<P extends AbstractPlayer> extends FrameLayout
             // Player is in a reusable state, attempt seamless switch
             mMediaPlayer.switchDataSource(url, headers);
         } else {
-            // Player not initialized or in error state, fall back to full cycle
+            // Player not initialized or in error state, fall back to full cycle.
+            // start() only restarts from STATE_IDLE/STATE_START_ABORT, so a failed player has to
+            // be released first — otherwise switching channels after an error does nothing.
+            if (!isInIdleState() && !isInStartAbortState()) {
+                release();
+            }
             setUrl(url, headers);
             start();
         }

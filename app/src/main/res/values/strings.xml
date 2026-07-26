@@ -22,4 +22,9 @@
     <string name="rebind">Rebind</string>
     <string name="waiting_key">Waiting for key...</string>
     <string name="no_playlist_configured">No playlist configured. Press MENU to open settings, or configure it from a browser at port %1$d of this device.</string>
+    <string name="playback_buffering">Buffering…</string>
+    <string name="playback_reconnecting">Playback failed, reconnecting… (%1$d/%2$d)</string>
+    <string name="playback_failed">Cannot play %1$s. Press OK to choose another channel.</string>
+    <string name="playlist_load_failed">Cannot load the playlist: %1$s</string>
+    <string name="playlist_load_failed_cached">Cannot refresh the playlist (%1$s). Showing the last saved copy.</string>
 </resources>
