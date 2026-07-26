@@ -6,20 +6,42 @@ import android.util.Log;
 import com.cabletv.player.config.AppConfig;
 import com.google.gson.JsonObject;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 public class ConfigWebServer {
     private static final String TAG = "ConfigWebServer";
+
+    /** Request line cap; a legitimate config request is a few dozen bytes. */
+    private static final int MAX_REQUEST_LINE_BYTES = 2048;
+    /** Header count cap, guards against a client that never sends a blank line. */
+    private static final int MAX_HEADER_LINES = 64;
+    /** Body cap; the only bodies we accept are two short form fields. */
+    private static final int MAX_BODY_BYTES = 64 * 1024;
+    /**
+     * A client that connects but never sends a request head must release its worker
+     * quickly, otherwise a handful of idle sockets makes the server unavailable.
+     */
+    private static final int HEAD_TIMEOUT_MS = 3_000;
+    /** Once a valid head has arrived, allow a slower body transfer. */
+    private static final int BODY_TIMEOUT_MS = 10_000;
+    /** Bounded worker pool, so many connections cannot exhaust threads. */
+    private static final int MAX_WORKERS = 8;
+
     private static ServerSocket sServerSocket;
     private static Thread sServerThread;
+    private static ExecutorService sWorkers;
     private static volatile boolean sRunning = false;
 
     public interface OnConfigChangeListener {
@@ -29,26 +51,42 @@ public class ConfigWebServer {
 
     private static OnConfigChangeListener sConfigChangeListener;
 
-    public static void startServer(Context context, int port) {
-        if (sRunning && sServerSocket != null) {
+    public static synchronized void startServer(Context context, int port) {
+        if (sRunning) {
             Log.i(TAG, "Server already running on port " + sServerSocket.getLocalPort());
             return;
         }
 
-        sServerThread = new Thread(() -> runServer(port));
+        // Bind on the calling thread so a port conflict surfaces here instead of
+        // racing with the accept loop.
+        try {
+            sServerSocket = new ServerSocket(port);
+        } catch (IOException e) {
+            Log.e(TAG, "Cannot bind web server to port " + port, e);
+            sServerSocket = null;
+            return;
+        }
+
+        sRunning = true;
+        // No queue: once all workers are busy, further connections are rejected and
+        // closed immediately instead of waiting behind a stalled client.
+        sWorkers = new ThreadPoolExecutor(1, MAX_WORKERS, 30, TimeUnit.SECONDS,
+                new SynchronousQueue<>());
+        sServerThread = new Thread(ConfigWebServer::runServer, "ConfigWebServer");
         sServerThread.setDaemon(true);
         sServerThread.start();
+        Log.i(TAG, "Web server started on port " + port);
     }
 
     public static void startServer(Context context) {
-        startServer(context, 8899);
+        startServer(context, AppConfig.getWebServerPort());
     }
 
     public static void setConfigChangeListener(OnConfigChangeListener listener) {
         sConfigChangeListener = listener;
     }
 
-    public static void stopServer() {
+    public static synchronized void stopServer() {
         sRunning = false;
         if (sServerSocket != null) {
             try {
@@ -56,19 +94,30 @@ public class ConfigWebServer {
             } catch (IOException e) {
                 Log.e(TAG, "Error closing server socket", e);
             }
+            sServerSocket = null;
+        }
+        if (sWorkers != null) {
+            sWorkers.shutdownNow();
+            sWorkers = null;
         }
         Log.i(TAG, "Web server stopped");
     }
 
-    private static void runServer(int port) {
+    private static void runServer() {
         try {
-            sServerSocket = new ServerSocket(port);
-            sRunning = true;
-            Log.i(TAG, "Web server started on port " + port);
-
             while (sRunning) {
                 Socket clientSocket = sServerSocket.accept();
-                new Thread(() -> handleClient(clientSocket)).start();
+                ExecutorService workers = sWorkers;
+                if (workers == null) {
+                    closeQuietly(clientSocket);
+                    break;
+                }
+                try {
+                    workers.execute(() -> handleClient(clientSocket));
+                } catch (Exception e) {
+                    // Pool saturated or shutting down: drop the connection rather than queue forever.
+                    closeQuietly(clientSocket);
+                }
             }
         } catch (IOException e) {
             if (sRunning) {
@@ -81,33 +130,84 @@ public class ConfigWebServer {
 
     private static void handleClient(Socket socket) {
         try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            String requestLine = reader.readLine();
+            socket.setSoTimeout(HEAD_TIMEOUT_MS);
+            InputStream in = socket.getInputStream();
 
-            if (requestLine == null) {
-                socket.close();
+            String requestLine = readLine(in, MAX_REQUEST_LINE_BYTES);
+            if (requestLine == null || requestLine.isEmpty()) {
                 return;
             }
 
             String[] parts = requestLine.split(" ");
+            if (parts.length < 2) {
+                sendResponse(socket, "400 Bad Request", 400, "text/plain");
+                return;
+            }
             String method = parts[0];
             String path = parts[1];
 
             // Read headers
-            String line;
             int contentLength = 0;
-            while ((line = reader.readLine()) != null && !line.isEmpty()) {
-                if (line.toLowerCase().startsWith("content-length:")) {
-                    contentLength = Integer.parseInt(line.substring(15).trim());
+            String origin = null;
+            String host = null;
+            String requestContentType = "";
+            for (int i = 0; i < MAX_HEADER_LINES; i++) {
+                String line = readLine(in, MAX_REQUEST_LINE_BYTES);
+                if (line == null || line.isEmpty()) break;
+                String lower = line.toLowerCase();
+                if (lower.startsWith("content-length:")) {
+                    contentLength = parseContentLength(line.substring("content-length:".length()));
+                    if (contentLength < 0) {
+                        sendResponse(socket, "400 Bad Request", 400, "text/plain");
+                        return;
+                    }
+                    if (contentLength > MAX_BODY_BYTES) {
+                        sendResponse(socket, "413 Payload Too Large", 413, "text/plain");
+                        return;
+                    }
+                } else if (lower.startsWith("origin:")) {
+                    origin = line.substring("origin:".length()).trim();
+                } else if (lower.startsWith("host:")) {
+                    host = line.substring("host:".length()).trim();
+                } else if (lower.startsWith("content-type:")) {
+                    requestContentType = lower.substring("content-type:".length()).trim();
                 }
             }
 
-            // Read body
+            // Read body (exact byte count, then decode as UTF-8 — char counts and
+            // Content-Length disagree for non-ASCII URLs).
             String body = "";
             if (contentLength > 0) {
-                char[] buffer = new char[contentLength];
-                reader.read(buffer);
-                body = new String(buffer);
+                socket.setSoTimeout(BODY_TIMEOUT_MS);
+                byte[] raw = new byte[contentLength];
+                int off = 0;
+                while (off < contentLength) {
+                    int n = in.read(raw, off, contentLength - off);
+                    if (n == -1) break;
+                    off += n;
+                }
+                if (off < contentLength) {
+                    sendResponse(socket, "400 Bad Request", 400, "text/plain");
+                    return;
+                }
+                body = new String(raw, "UTF-8");
+            }
+
+            if ("POST".equals(method)) {
+                // The server has no authentication, so it must at least refuse
+                // browser-driven cross-site writes: any page the user visits could
+                // otherwise silently repoint the playlist. Browsers send Origin on
+                // cross-site POSTs; local tools (curl and the page we serve) do not
+                // trip this check.
+                if (isCrossSite(origin, host)) {
+                    Log.w(TAG, "Rejected cross-site POST from origin: " + origin);
+                    sendResponse(socket, "403 Forbidden", 403, "text/plain");
+                    return;
+                }
+                if (!requestContentType.startsWith("application/x-www-form-urlencoded")) {
+                    sendResponse(socket, "415 Unsupported Media Type", 415, "text/plain");
+                    return;
+                }
             }
 
             String response;
@@ -125,34 +225,99 @@ public class ConfigWebServer {
                 response = handleEpgUrlPost(body);
                 contentType = "application/json";
             } else {
-                response = "404 Not Found";
-                sendResponse(socket, response, 404, "text/plain");
-                socket.close();
+                sendResponse(socket, "404 Not Found", 404, "text/plain");
                 return;
             }
 
             sendResponse(socket, response, 200, contentType);
-            socket.close();
+        } catch (java.net.SocketTimeoutException e) {
+            // Idle or stalled client: expected, not worth a stack trace.
+            Log.d(TAG, "Client timed out: " + socket.getInetAddress());
         } catch (Exception e) {
             Log.e(TAG, "Error handling client", e);
-            try {
-                socket.close();
-            } catch (IOException ignored) {}
+        } finally {
+            closeQuietly(socket);
         }
     }
 
+    /**
+     * Reads one CRLF-terminated line, capped at maxBytes. Returns null at end of stream.
+     */
+    private static String readLine(InputStream in, int maxBytes) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int b;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') {
+                return new String(buffer.toByteArray(), "UTF-8");
+            }
+            if (b == '\r') {
+                continue;
+            }
+            if (buffer.size() >= maxBytes) {
+                throw new IOException("Header line exceeds " + maxBytes + " bytes");
+            }
+            buffer.write(b);
+        }
+        return buffer.size() == 0 ? null : new String(buffer.toByteArray(), "UTF-8");
+    }
+
+    private static int parseContentLength(String value) {
+        try {
+            long length = Long.parseLong(value.trim());
+            if (length < 0) return -1;
+            // Clamp instead of overflowing; caller rejects anything over the cap.
+            return length > MAX_BODY_BYTES ? MAX_BODY_BYTES + 1 : (int) length;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    /**
+     * True when the request carries an Origin that is not this server itself.
+     */
+    private static boolean isCrossSite(String origin, String host) {
+        if (origin == null || origin.isEmpty() || "null".equals(origin)) {
+            return false; // Not a browser cross-site request.
+        }
+        if (host == null || host.isEmpty()) {
+            return true; // Origin present but no Host to compare against: refuse.
+        }
+        String originAuthority = origin.replaceFirst("(?i)^https?://", "");
+        return !originAuthority.equalsIgnoreCase(host);
+    }
+
+    private static void closeQuietly(Socket socket) {
+        try {
+            socket.close();
+        } catch (IOException ignored) {}
+    }
+
     private static void sendResponse(Socket socket, String body, int statusCode, String contentType) throws IOException {
-        String status = statusCode == 200 ? "OK" : "Not Found";
-        String response = "HTTP/1.1 " + statusCode + " " + status + "\r\n" +
+        byte[] payload = body.getBytes("UTF-8");
+        String response = "HTTP/1.1 " + statusCode + " " + statusText(statusCode) + "\r\n" +
                 "Content-Type: " + contentType + "\r\n" +
-                "Content-Length: " + body.getBytes().length + "\r\n" +
-                "Access-Control-Allow-Origin: *\r\n" +
+                "Content-Length: " + payload.length + "\r\n" +
+                "X-Content-Type-Options: nosniff\r\n" +
+                "Cache-Control: no-store\r\n" +
                 "Connection: close\r\n" +
-                "\r\n" + body;
+                "\r\n";
 
         OutputStream os = socket.getOutputStream();
-        os.write(response.getBytes());
+        os.write(response.getBytes("UTF-8"));
+        os.write(payload);
         os.flush();
+    }
+
+    private static String statusText(int statusCode) {
+        switch (statusCode) {
+            case 200: return "OK";
+            case 400: return "Bad Request";
+            case 403: return "Forbidden";
+            case 404: return "Not Found";
+            case 413: return "Payload Too Large";
+            case 415: return "Unsupported Media Type";
+            default: return "Error";
+        }
     }
 
     private static String handleM3uUrlPost(String body) {
