@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
     private boolean mChannelListVisible = false;
+    private boolean mIsInitialLoad = true;
     private static final long CHANNEL_SWITCH_DEBOUNCE_MS = 250;
 
     @Override
@@ -77,8 +78,15 @@ public class MainActivity extends Activity {
                     mChannelListComponent.updateChannels(
                             mChannelRepository.getAllChannels(), mCurrentChannelIndex);
                 }
-                // Reset to first channel when playlist updates
-                mCurrentChannelIndex = 0;
+                // On initial load, try to resume last played channel; on subsequent reloads, reset to first
+                if (mIsInitialLoad) {
+                    mIsInitialLoad = false;
+                    mCurrentChannelIndex = mChannelRepository.getCurrentChannelIndex(AppConfig.getLastChannelUrl());
+                    Log.d(TAG, "Initial load: restoring last channel with url=" + AppConfig.getLastChannelUrl() + ", index=" + mCurrentChannelIndex);
+                } else {
+                    mCurrentChannelIndex = 0;
+                    Log.d(TAG, "Subsequent reload: resetting to first channel");
+                }
                 playChannel(mCurrentChannelIndex);
 
                 // Trigger EPG bulk preload now that channels are truly available (no race with reload())
@@ -367,6 +375,8 @@ public class MainActivity extends Activity {
                     mPlaybackInfoComponent.showChannelInfo(channel);
                 }
             });
+            // Save current channel for resume on next app startup
+            AppConfig.setLastChannelUrl(channel.url);
             Log.d(TAG, "About to call mEpgManager.loadEpg for channel: " + channel.name);
             mEpgManager.loadEpg(channel);
         } else {

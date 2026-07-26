@@ -14,6 +14,7 @@ public class AppConfig {
     private static final String EPG_DISPLAY_KEY = "app_epg_display_enabled";
     private static final String EPG_LAST_UPDATE_KEY = "app_epg_last_update";
     private static final String EPG_CACHE_VALIDITY_HOURS_KEY = "app_epg_cache_hours";
+    private static final String LAST_CHANNEL_URL_KEY = "app_last_channel_url";
 
     private static final String DEFAULT_EPG_URL = "";
     private static final int DEFAULT_WEB_SERVER_PORT = 8899;
@@ -107,5 +108,14 @@ public class AppConfig {
         }
         long cacheAgeHours = (System.currentTimeMillis() - lastUpdate) / (1000 * 60 * 60);
         return cacheAgeHours < getEpgCacheValidityHours();
+    }
+
+    // Last played channel URL (for resume playback on app startup)
+    public static String getLastChannelUrl() {
+        return Hawk.get(LAST_CHANNEL_URL_KEY, "");
+    }
+
+    public static void setLastChannelUrl(String url) {
+        Hawk.put(LAST_CHANNEL_URL_KEY, url);
     }
 }
