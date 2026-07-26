@@ -15,6 +15,7 @@ import com.google.gson.JsonObject;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
 import java.io.BufferedReader;
@@ -197,9 +198,7 @@ public class EpgManager {
                     data = decompressed.getBytes("UTF-8");
                 }
 
-                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                DocumentBuilder builder = factory.newDocumentBuilder();
-                Document doc = builder.parse(new java.io.ByteArrayInputStream(data));
+                Document doc = parseXmlSafely(data);
 
                 Log.d(TAG, "Parsing XMLTV EPG for all channels");
                 for (Channel channel : channels) {
@@ -568,12 +567,77 @@ public class EpgManager {
         return out.toString("UTF-8");
     }
 
+    /**
+     * Parses XMLTV with external entity resolution disabled. Doctypes are rejected
+     * outright first; since many legitimate XMLTV feeds declare
+     * {@code <!DOCTYPE tv SYSTEM "xmltv.dtd">}, a doctype failure falls back to a
+     * parser that tolerates the declaration but still refuses to fetch anything it
+     * points at.
+     */
+    private Document parseXmlSafely(byte[] xml) throws Exception {
+        try {
+            return newSafeDocumentBuilder(true).parse(new java.io.ByteArrayInputStream(xml));
+        } catch (SAXException e) {
+            String message = e.getMessage() == null ? "" : e.getMessage().toUpperCase(Locale.US);
+            if (!message.contains("DOCTYPE") && !message.contains("DTD")) {
+                throw e;
+            }
+            Log.w(TAG, "EPG declares a DOCTYPE; retrying with external entities blocked");
+            return newSafeDocumentBuilder(false).parse(new java.io.ByteArrayInputStream(xml));
+        }
+    }
+
+    /**
+     * XMLTV data comes from a remote, cleartext HTTP source, so the parser must not
+     * be allowed to resolve external entities (XXE / SSRF / entity expansion).
+     * Feature support varies between XML implementations, so each is applied
+     * best-effort and backed by an entity resolver that always returns nothing.
+     */
+    private DocumentBuilder newSafeDocumentBuilder(boolean disallowDoctype) throws ParserConfigurationException {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        setFeatureQuietly(factory, "http://apache.org/xml/features/disallow-doctype-decl", disallowDoctype);
+        setFeatureQuietly(factory, "http://xml.org/sax/features/external-general-entities", false);
+        setFeatureQuietly(factory, "http://xml.org/sax/features/external-parameter-entities", false);
+        setFeatureQuietly(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        // Android's DocumentBuilderFactory throws UnsupportedOperationException for
+        // some of these, so every setter here is best-effort too. The entity resolver
+        // installed below is the implementation-independent guarantee.
+        trySet(factory, f -> f.setExpandEntityReferences(false), "expandEntityReferences");
+        trySet(factory, f -> f.setXIncludeAware(false), "xIncludeAware");
+        trySet(factory, f -> f.setValidating(false), "validating");
+
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        builder.setEntityResolver((publicId, systemId) -> {
+            Log.w(TAG, "Blocked external entity in EPG XML: " + systemId);
+            return new InputSource(new java.io.ByteArrayInputStream(new byte[0]));
+        });
+        return builder;
+    }
+
+    private void setFeatureQuietly(DocumentBuilderFactory factory, String feature, boolean value) {
+        try {
+            factory.setFeature(feature, value);
+        } catch (ParserConfigurationException | RuntimeException e) {
+            Log.d(TAG, "XML feature not supported by this parser: " + feature);
+        }
+    }
+
+    private interface FactorySetter {
+        void apply(DocumentBuilderFactory factory);
+    }
+
+    private void trySet(DocumentBuilderFactory factory, FactorySetter setter, String name) {
+        try {
+            setter.apply(factory);
+        } catch (RuntimeException e) {
+            Log.d(TAG, "XML setting not supported by this parser: " + name);
+        }
+    }
+
     private void parseXmltvEpg(Channel channel, String xmlString) {
         try {
             Log.d(TAG, "parseXmltvEpg: Starting for " + channel.name + ", tvgId=" + channel.tvgId);
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            DocumentBuilder builder = factory.newDocumentBuilder();
-            Document doc = builder.parse(new java.io.ByteArrayInputStream(xmlString.getBytes("UTF-8")));
+            Document doc = parseXmlSafely(xmlString.getBytes("UTF-8"));
 
             Log.d(TAG, "XML document parsed successfully");
 
