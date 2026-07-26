@@ -145,6 +145,7 @@ public class MainActivity extends Activity {
         }
         mLastChannelSwitchTime = now;
 
+        Log.d(TAG, "handleChannelUp: mChannelListVisible=" + mChannelListVisible);
         boolean swapped = AppConfig.isChannelUpDownSwapped();
 
         if (mChannelListVisible && mChannelListComponent != null) {
@@ -161,12 +162,14 @@ public class MainActivity extends Activity {
             }
         } else {
             int count = mChannelRepository.getChannelCount();
+            Log.d(TAG, "handleChannelUp: Channel list not visible, count=" + count);
             if (count > 0) {
                 if (swapped) {
                     mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
                 } else {
                     mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
                 }
+                Log.d(TAG, "handleChannelUp: Calling playChannel with index=" + mCurrentChannelIndex);
                 playChannel(mCurrentChannelIndex);
             }
         }
@@ -297,7 +300,9 @@ public class MainActivity extends Activity {
     }
 
     private void playChannel(int index) {
+        Log.d(TAG, "playChannel called with index: " + index);
         Channel channel = mChannelRepository.getChannel(index);
+        Log.d(TAG, "Got channel from repository: " + (channel != null ? channel.name : "null"));
         if (channel != null) {
             Log.d(TAG, "Playing channel: " + channel.name + " - " + channel.url);
             // Ensure UI operations happen on main thread
@@ -312,7 +317,10 @@ public class MainActivity extends Activity {
                     mPlaybackInfoComponent.showChannelInfo(channel);
                 }
             });
+            Log.d(TAG, "About to call mEpgManager.loadEpg for channel: " + channel.name);
             mEpgManager.loadEpg(channel);
+        } else {
+            Log.d(TAG, "Channel is null for index: " + index);
         }
     }
 

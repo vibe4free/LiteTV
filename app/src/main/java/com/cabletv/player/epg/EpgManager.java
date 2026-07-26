@@ -10,7 +10,13 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
+
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -19,6 +25,11 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.zip.GZIPInputStream;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 
 public class EpgManager {
     private static final String TAG = "EpgManager";
@@ -49,12 +60,16 @@ public class EpgManager {
     }
 
     public void loadEpg(Channel channel) {
+        Log.d(TAG, "loadEpg called for channel: " + (channel != null ? channel.name : "null"));
         if (channel == null || channel.tvgId == null || channel.tvgId.isEmpty()) {
+            Log.d(TAG, "Channel or tvgId is null/empty, returning");
             return;
         }
 
         String epgUrl = AppConfig.getEpgUrl();
+        Log.d(TAG, "EPG URL from config: " + epgUrl);
         if (epgUrl == null || epgUrl.isEmpty()) {
+            Log.d(TAG, "EPG URL is empty, returning");
             return;
         }
 
@@ -70,7 +85,7 @@ public class EpgManager {
             return EpgSourceType.DIYP;
         } else if (url.contains("zip")) {
             return EpgSourceType.ZIP;
-        } else if (url.contains("xml")) {
+        } else if (url.contains("xml") || url.endsWith(".gz") || url.endsWith(".xml")) {
             return EpgSourceType.XMLTV;
         }
         // Default to DIYP for 51zmt API style
@@ -127,9 +142,22 @@ public class EpgManager {
 
     private void loadXmltvEpg(Channel channel, String xmltvUrl) {
         try {
-            Log.d(TAG, "XMLTV EPG format support prepared (requires additional implementation)");
-            // TODO: Implement XMLTV parsing
-            // Format: Direct XML parsing with channel name matching
+            byte[] content = fetchUrlAsBytes(xmltvUrl);
+            if (content != null && content.length > 0) {
+                Log.d(TAG, "XMLTV EPG response length: " + content.length);
+                String xmlString;
+
+                // Check if content is gzip compressed
+                if (isGzipCompressed(content)) {
+                    Log.d(TAG, "Content is gzip compressed, decompressing...");
+                    xmlString = decompressGzip(content);
+                } else {
+                    xmlString = new String(content, "UTF-8");
+                }
+
+                parseXmltvEpg(channel, xmlString);
+                Log.d(TAG, "XMLTV EPG loaded for channel: " + channel.name);
+            }
         } catch (Exception e) {
             Log.w(TAG, "Error loading XMLTV EPG for " + channel.name, e);
         }
@@ -201,7 +229,161 @@ public class EpgManager {
     }
 
     public String getSupportedFormats() {
-        return "DIYP (51zmt JSON API), ZIP (package with XMLTV), XMLTV (direct XML)";
+        return "DIYP (51zmt JSON API), ZIP (package with XMLTV), XMLTV (direct XML, gzip supported)";
+    }
+
+    private byte[] fetchUrlAsBytes(String urlString) {
+        try {
+            URL url = new URL(urlString);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(10000);
+
+            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                int read;
+                byte[] data = new byte[16384];
+
+                java.io.InputStream is = connection.getInputStream();
+                while ((read = is.read(data)) != -1) {
+                    buffer.write(data, 0, read);
+                }
+                is.close();
+                return buffer.toByteArray();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching URL: " + urlString, e);
+        }
+        return null;
+    }
+
+    private boolean isGzipCompressed(byte[] data) {
+        if (data == null || data.length < 2) {
+            return false;
+        }
+        return (data[0] == (byte) 0x1f) && (data[1] == (byte) 0x8b);
+    }
+
+    private String decompressGzip(byte[] compressed) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        GZIPInputStream gis = new GZIPInputStream(new java.io.ByteArrayInputStream(compressed));
+        byte[] buffer = new byte[1024];
+        int len;
+        while ((len = gis.read(buffer)) != -1) {
+            out.write(buffer, 0, len);
+        }
+        gis.close();
+        return out.toString("UTF-8");
+    }
+
+    private void parseXmltvEpg(Channel channel, String xmlString) {
+        try {
+            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder builder = factory.newDocumentBuilder();
+            Document doc = builder.parse(new java.io.ByteArrayInputStream(xmlString.getBytes("UTF-8")));
+
+            // Find the channel ID to match
+            String channelId = findChannelIdByName(doc, channel);
+            if (channelId == null) {
+                Log.d(TAG, "Channel not found in XMLTV for: " + channel.name);
+                return;
+            }
+
+            Log.d(TAG, "Found channel ID " + channelId + " for channel: " + channel.name);
+
+            // Get current time
+            long currentTime = System.currentTimeMillis();
+
+            // Find matching programme for current time
+            NodeList programmes = doc.getElementsByTagName("programme");
+            for (int i = 0; i < programmes.getLength(); i++) {
+                Element prog = (Element) programmes.item(i);
+                String progChannel = prog.getAttribute("channel");
+
+                if (!progChannel.equals(channelId)) {
+                    continue;
+                }
+
+                try {
+                    long startTime = parseXmltvTime(prog.getAttribute("start"));
+                    long stopTime = parseXmltvTime(prog.getAttribute("stop"));
+
+                    if (currentTime >= startTime && currentTime < stopTime) {
+                        String title = "";
+                        NodeList titleNodes = prog.getElementsByTagName("title");
+                        if (titleNodes.getLength() > 0) {
+                            title = titleNodes.item(0).getTextContent();
+                        }
+
+                        if (title != null && !title.isEmpty()) {
+                            Program program = new Program(title, startTime, stopTime);
+                            mPrograms.put(channel.tvgId, program);
+                            Log.d(TAG, "XMLTV program matched for " + channel.name + ": " + title);
+                        }
+                        return;
+                    }
+                } catch (Exception e) {
+                    Log.d(TAG, "Error parsing programme: " + e.getMessage());
+                }
+            }
+
+            Log.d(TAG, "No matching programme found for current time in channel: " + channel.name);
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing XMLTV EPG: " + e.getMessage(), e);
+        }
+    }
+
+    private String findChannelIdByName(Document doc, Channel channel) {
+        NodeList channels = doc.getElementsByTagName("channel");
+        String channelName = channel.tvgId;
+        if (channelName == null || channelName.isEmpty()) {
+            channelName = channel.name;
+        }
+
+        String channelNameLower = channelName.toLowerCase();
+
+        for (int i = 0; i < channels.getLength(); i++) {
+            Element channelElem = (Element) channels.item(i);
+            String id = channelElem.getAttribute("id");
+
+            NodeList displayNames = channelElem.getElementsByTagName("display-name");
+            for (int j = 0; j < displayNames.getLength(); j++) {
+                String displayName = displayNames.item(j).getTextContent();
+                if (displayName != null && displayName.toLowerCase().contains(channelNameLower)) {
+                    return id;
+                }
+            }
+
+            // Also try to match by numeric ID
+            if (channelName.matches("\\d+") && id.equals(channelName)) {
+                return id;
+            }
+        }
+
+        return null;
+    }
+
+    private long parseXmltvTime(String timeStr) {
+        try {
+            if (timeStr == null || timeStr.isEmpty()) {
+                return 0;
+            }
+
+            // Format: "20260726004600 +0800"
+            String[] parts = timeStr.trim().split("\\s+");
+            if (parts.length < 1) {
+                return 0;
+            }
+
+            String dateTimeStr = parts[0];
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss", Locale.US);
+            Date date = sdf.parse(dateTimeStr);
+            return date.getTime();
+        } catch (Exception e) {
+            Log.d(TAG, "Error parsing XMLTV time: " + timeStr);
+            return 0;
+        }
     }
 
     private String fetchUrl(String urlString) {
