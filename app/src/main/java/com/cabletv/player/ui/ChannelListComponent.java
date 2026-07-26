@@ -37,6 +37,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     private OnChannelSelectedListener mSelectionListener;
     private EpgManager mEpgManager;
     private boolean mProgramListVisible = false;
+    private static final long EPG_REFRESH_INTERVAL = 1000; // Refresh EPG display every 1 second
 
     public interface OnChannelSelectedListener {
         void onChannelSelected(int index, Channel channel);
@@ -87,9 +88,8 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
         mRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         mRecyclerView.setBackgroundColor(0x00000000);
-        mRecyclerView.setFocusable(true);
-        mRecyclerView.setFocusableInTouchMode(true);
-        mRecyclerView.requestFocus();
+        // Don't request focus - let MainActivity handle all key events
+        mRecyclerView.setFocusable(false);
         channelSection.addView(mRecyclerView);
 
         mainContainer.addView(channelSection);
@@ -113,6 +113,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mProgramRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
         mProgramRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         mProgramRecyclerView.setBackgroundColor(0x00000000);
+        mProgramRecyclerView.setFocusable(false);
         mProgramListContainer.addView(mProgramRecyclerView);
 
         mainContainer.addView(mProgramListContainer);
@@ -214,6 +215,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         setVisibility(isVisible ? VISIBLE : GONE);
         if (anim != null) {
             startAnimation(anim);
+        }
+
+        // Refresh adapter when menu becomes visible to show all EPG data
+        if (isVisible && mAdapter != null) {
+            mAdapter.notifyDataSetChanged();
         }
     }
 
@@ -416,8 +422,9 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
                 timeView = new TextView(context);
                 timeView.setTextColor(0xFF888888);
                 timeView.setTextSize(11);
+                timeView.setSingleLine(true);
                 timeView.setLayoutParams(new LinearLayout.LayoutParams(
-                        dp2px(50),
+                        dp2px(85),
                         LinearLayout.LayoutParams.WRAP_CONTENT));
                 container.addView(timeView);
 
