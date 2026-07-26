@@ -25,7 +25,7 @@ public class MainActivity extends Activity {
     private ChannelRepository mChannelRepository;
     private EpgManager mEpgManager;
     private ChannelListComponent mChannelListComponent;
-    private SwitchOverlayComponent mSwitchOverlay;
+    private PlaybackInfoComponent mPlaybackInfoComponent;
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
     private boolean mChannelListVisible = false;
@@ -58,8 +58,15 @@ public class MainActivity extends Activity {
             }
         }
 
-        mSwitchOverlay = new SwitchOverlayComponent(this);
-        rootView.addView(mSwitchOverlay);
+        // Add bottom playback info bar
+        mPlaybackInfoComponent = new PlaybackInfoComponent(this);
+        mPlaybackInfoComponent.setEpgManager(mEpgManager);
+        FrameLayout.LayoutParams infoBarlp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                dp2px(100));
+        infoBarlp.gravity = android.view.Gravity.BOTTOM;
+        mPlaybackInfoComponent.setLayoutParams(infoBarlp);
+        rootView.addView(mPlaybackInfoComponent);
 
         // Setup channel change listener
         mChannelRepository.addListener(new ChannelRepository.OnChannelsChangedListener() {
@@ -138,10 +145,21 @@ public class MainActivity extends Activity {
         }
         mLastChannelSwitchTime = now;
 
-        int count = mChannelRepository.getChannelCount();
-        if (count > 0) {
-            mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
-            playChannel(mCurrentChannelIndex);
+        if (mChannelListVisible && mChannelListComponent != null) {
+            // When channel list is visible, select previous channel
+            int selected = mChannelListComponent.getSelectedChannelIndex();
+            int count = mChannelRepository.getChannelCount();
+            if (count > 0) {
+                selected = (selected + 1) % count;
+                mChannelListComponent.selectChannel(selected);
+            }
+        } else {
+            // Direct channel switch when list is not visible
+            int count = mChannelRepository.getChannelCount();
+            if (count > 0) {
+                mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
+                playChannel(mCurrentChannelIndex);
+            }
         }
     }
 
@@ -152,10 +170,21 @@ public class MainActivity extends Activity {
         }
         mLastChannelSwitchTime = now;
 
-        int count = mChannelRepository.getChannelCount();
-        if (count > 0) {
-            mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
-            playChannel(mCurrentChannelIndex);
+        if (mChannelListVisible && mChannelListComponent != null) {
+            // When channel list is visible, select next channel
+            int selected = mChannelListComponent.getSelectedChannelIndex();
+            int count = mChannelRepository.getChannelCount();
+            if (count > 0) {
+                selected = (selected - 1 + count) % count;
+                mChannelListComponent.selectChannel(selected);
+            }
+        } else {
+            // Direct channel switch when list is not visible
+            int count = mChannelRepository.getChannelCount();
+            if (count > 0) {
+                mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
+                playChannel(mCurrentChannelIndex);
+            }
         }
     }
 
@@ -178,13 +207,17 @@ public class MainActivity extends Activity {
     }
 
     private void handleOk() {
-        Log.d(TAG, "handleOk called, mChannelListVisible=" + mChannelListVisible);
-        mChannelListVisible = !mChannelListVisible;
-        Log.d(TAG, "After toggle, mChannelListVisible=" + mChannelListVisible);
         if (mChannelListVisible) {
-            showChannelList();
-        } else {
+            // Confirm channel selection and switch
+            if (mChannelListComponent != null) {
+                mChannelListComponent.confirmSelection();
+            }
             hideChannelList();
+            mChannelListVisible = false;
+        } else {
+            // Show channel list for selection
+            mChannelListVisible = true;
+            showChannelList();
         }
     }
 
@@ -193,6 +226,14 @@ public class MainActivity extends Activity {
             mChannelListComponent = new ChannelListComponent(
                     this, mChannelRepository.getAllChannels());
             mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
+            mChannelListComponent.selectChannel(mCurrentChannelIndex);
+            mChannelListComponent.setEpgManager(mEpgManager);
+
+            // Set channel selection listener
+            mChannelListComponent.setOnChannelSelectedListener((index, channel) -> {
+                mCurrentChannelIndex = index;
+                playChannel(index);
+            });
 
             // Add to VideoView's parent or create appropriate params
             if (mVideoView.getParent() instanceof android.view.ViewGroup) {
@@ -209,11 +250,9 @@ public class MainActivity extends Activity {
                 }
                 parent.addView(mChannelListComponent);
             }
-            Log.d(TAG, "ChannelListComponent created and added");
         }
         if (mChannelListComponent != null) {
             mChannelListComponent.setVisibility(android.view.View.VISIBLE);
-            Log.d(TAG, "ChannelListComponent set to VISIBLE");
         }
     }
 
@@ -242,13 +281,14 @@ public class MainActivity extends Activity {
             Log.d(TAG, "Playing channel: " + channel.name + " - " + channel.url);
             // Ensure UI operations happen on main thread
             runOnUiThread(() -> {
-                if (mSwitchOverlay != null) {
-                    mSwitchOverlay.showChannelSwitch(channel);
-                }
                 mVideoView.switchUrl(channel.url, channel.headers);
                 mVideoView.start();
                 if (mChannelListComponent != null) {
                     mChannelListComponent.setCurrentChannel(index);
+                }
+                // Show bottom playback info bar
+                if (mPlaybackInfoComponent != null) {
+                    mPlaybackInfoComponent.showChannelInfo(channel);
                 }
             });
             mEpgManager.loadEpg(channel);

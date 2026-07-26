@@ -70,6 +70,19 @@ public class EpgManager {
         return mPrograms.get(channel.tvgId);
     }
 
+    public String getCurrentProgramInfo(Channel channel) {
+        Program program = getCurrentProgram(channel);
+        if (program != null) {
+            return program.title;
+        }
+        return null;
+    }
+
+    public String getNextProgramInfo(Channel channel) {
+        // TODO: Implement next program lookup from EPG cache
+        return null;
+    }
+
     private String fetchUrl(String urlString) {
         try {
             URL url = new URL(urlString);

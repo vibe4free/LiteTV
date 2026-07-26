@@ -12,8 +12,8 @@ import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
+import com.cabletv.player.epg.EpgManager;
 import com.cabletv.player.model.Channel;
 import xyz.doikki.videoplayer.controller.ControlWrapper;
 import xyz.doikki.videoplayer.controller.IControlComponent;
@@ -28,6 +28,13 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     private RecyclerView mRecyclerView;
     private List<Channel> mChannels = new ArrayList<>();
     private int mCurrentChannelIndex = 0;
+    private int mSelectedChannelIndex = 0;
+    private OnChannelSelectedListener mSelectionListener;
+    private EpgManager mEpgManager;
+
+    public interface OnChannelSelectedListener {
+        void onChannelSelected(int index, Channel channel);
+    }
 
     public ChannelListComponent(@NonNull Context context, List<Channel> channels) {
         super(context);
@@ -73,10 +80,20 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         addView(container);
     }
 
+    public void setEpgManager(EpgManager epgManager) {
+        mEpgManager = epgManager;
+        mAdapter.setEpgManager(epgManager);
+    }
+
+    public void setOnChannelSelectedListener(OnChannelSelectedListener listener) {
+        mSelectionListener = listener;
+    }
+
     public void updateChannels(List<Channel> channels, int currentIndex) {
         mChannels = new ArrayList<>(channels);
         mCurrentChannelIndex = currentIndex;
-        mAdapter.updateData(mChannels, currentIndex);
+        mSelectedChannelIndex = currentIndex;
+        mAdapter.updateData(mChannels, currentIndex, currentIndex);
         mRecyclerView.scrollToPosition(currentIndex);
     }
 
@@ -84,6 +101,24 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mCurrentChannelIndex = index;
         mAdapter.setCurrentChannel(index);
         mRecyclerView.scrollToPosition(index);
+    }
+
+    public void selectChannel(int index) {
+        if (index < 0 || index >= mChannels.size()) return;
+        int oldIndex = mSelectedChannelIndex;
+        mSelectedChannelIndex = index;
+        mAdapter.setSelectedChannel(oldIndex, index);
+        mRecyclerView.scrollToPosition(index);
+    }
+
+    public void confirmSelection() {
+        if (mSelectionListener != null && mSelectedChannelIndex < mChannels.size()) {
+            mSelectionListener.onChannelSelected(mSelectedChannelIndex, mChannels.get(mSelectedChannelIndex));
+        }
+    }
+
+    public int getSelectedChannelIndex() {
+        return mSelectedChannelIndex;
     }
 
     @Override
@@ -108,22 +143,18 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
     @Override
     public void onPlayStateChanged(int playState) {
-        // Not needed for channel list
     }
 
     @Override
     public void onPlayerStateChanged(int playerState) {
-        // Not needed for channel list
     }
 
     @Override
     public void setProgress(int duration, int position) {
-        // Not needed for channel list
     }
 
     @Override
     public void onLockStateChanged(boolean isLocked) {
-        // Not needed for channel list
     }
 
     private int dp2px(int dp) {
@@ -135,15 +166,22 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         private final Context mContext;
         private List<Channel> mChannels;
         private int mCurrentIndex = 0;
+        private int mSelectedIndex = 0;
+        private EpgManager mEpgManager;
 
         public ChannelListAdapter(Context context, List<Channel> channels) {
             mContext = context;
             mChannels = new ArrayList<>(channels);
         }
 
-        public void updateData(List<Channel> channels, int currentIndex) {
+        public void setEpgManager(EpgManager epgManager) {
+            mEpgManager = epgManager;
+        }
+
+        public void updateData(List<Channel> channels, int currentIndex, int selectedIndex) {
             mChannels = new ArrayList<>(channels);
             mCurrentIndex = currentIndex;
+            mSelectedIndex = selectedIndex;
             notifyDataSetChanged();
         }
 
@@ -154,30 +192,27 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             notifyItemChanged(mCurrentIndex);
         }
 
+        public void setSelectedChannel(int oldIndex, int newIndex) {
+            notifyItemChanged(oldIndex);
+            notifyItemChanged(newIndex);
+        }
+
         @NonNull
         @Override
         public ChannelViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
-            TextView view = new TextView(mContext);
+            LinearLayout view = new LinearLayout(mContext);
+            view.setOrientation(LinearLayout.VERTICAL);
             view.setLayoutParams(new RecyclerView.LayoutParams(
                     RecyclerView.LayoutParams.MATCH_PARENT,
-                    dp2px(48)));
-            view.setTextColor(0xFFCCCCCC);
-            view.setTextSize(14);
-            view.setPadding(dp2px(16), dp2px(8), dp2px(16), dp2px(8));
-            return new ChannelViewHolder(view);
+                    dp2px(60)));
+            view.setPadding(dp2px(12), dp2px(8), dp2px(12), dp2px(8));
+            return new ChannelViewHolder(view, mContext);
         }
 
         @Override
         public void onBindViewHolder(@NonNull ChannelViewHolder holder, int position) {
             Channel channel = mChannels.get(position);
-            holder.textView.setText(channel.name);
-            if (position == mCurrentIndex) {
-                holder.textView.setTextColor(0xFFFF6B35);
-                holder.textView.setTextSize(15);
-            } else {
-                holder.textView.setTextColor(0xFFCCCCCC);
-                holder.textView.setTextSize(14);
-            }
+            holder.setChannel(channel, position == mSelectedIndex, position == mCurrentIndex, mEpgManager);
         }
 
         @Override
@@ -186,11 +221,59 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         }
 
         static class ChannelViewHolder extends RecyclerView.ViewHolder {
-            TextView textView;
+            private final LinearLayout container;
+            private final TextView nameView;
+            private final TextView epgView;
+            private final Context context;
 
-            ChannelViewHolder(TextView itemView) {
+            ChannelViewHolder(LinearLayout itemView, Context context) {
                 super(itemView);
-                textView = itemView;
+                this.context = context;
+                this.container = itemView;
+
+                nameView = new TextView(context);
+                nameView.setTextColor(0xFFCCCCCC);
+                nameView.setTextSize(14);
+                nameView.setLayoutParams(new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+                container.addView(nameView);
+
+                epgView = new TextView(context);
+                epgView.setTextColor(0xFF888888);
+                epgView.setTextSize(12);
+                epgView.setMaxLines(1);
+                epgView.setLayoutParams(new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+                container.addView(epgView);
+            }
+
+            void setChannel(Channel channel, boolean isSelected, boolean isCurrent, EpgManager epgManager) {
+                nameView.setText(channel.name);
+
+                if (isSelected) {
+                    nameView.setTextColor(0xFFFF6B35);
+                    nameView.setTextSize(15);
+                    container.setBackgroundColor(0x33FF6B35);
+                } else if (isCurrent) {
+                    nameView.setTextColor(0xFFFFFFFF);
+                    nameView.setTextSize(14);
+                    container.setBackgroundColor(0x00000000);
+                } else {
+                    nameView.setTextColor(0xFFCCCCCC);
+                    nameView.setTextSize(14);
+                    container.setBackgroundColor(0x00000000);
+                }
+
+                if (epgManager != null) {
+                    String epgInfo = epgManager.getCurrentProgramInfo(channel);
+                    epgView.setText(epgInfo != null ? epgInfo : "No EPG");
+                }
+            }
+
+            private int dp2px(int dp) {
+                return Math.round(context.getResources().getDisplayMetrics().density * dp);
             }
         }
 
