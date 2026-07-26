@@ -20,6 +20,7 @@ public class AppConfig {
     private static final int DEFAULT_WEB_SERVER_PORT = 8899;
     private static final float DEFAULT_SIDEBAR_ALPHA = 0.75f;
     private static final int DEFAULT_EPG_CACHE_HOURS = 24; // EPG 缓存 24 小时后刷新
+    private static final boolean DEFAULT_CHANNEL_UP_DOWN_SWAP = true; // Default to swapped for program list
 
     // M3U URL
     public static String getM3uUrl() {
@@ -83,9 +84,9 @@ public class AppConfig {
         Hawk.put(EPG_DISPLAY_KEY, enabled);
     }
 
-    // Channel up/down swap toggle
+    // Channel up/down swap toggle (only affects program list scroll)
     public static boolean isChannelUpDownSwapped() {
-        return Hawk.get(CHANNEL_UP_DOWN_SWAP_KEY, false);  // Default: not swapped
+        return Hawk.get(CHANNEL_UP_DOWN_SWAP_KEY, DEFAULT_CHANNEL_UP_DOWN_SWAP);
     }
 
     public static void setChannelUpDownSwapped(boolean swapped) {

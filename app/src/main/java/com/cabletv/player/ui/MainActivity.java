@@ -175,29 +175,32 @@ public class MainActivity extends Activity {
         mLastChannelSwitchTime = now;
 
         Log.d(TAG, "handleChannelUp: mChannelListVisible=" + mChannelListVisible);
-        boolean swapped = AppConfig.isChannelUpDownSwapped();
 
         if (mChannelListVisible && mChannelListComponent != null) {
+            boolean swapped = AppConfig.isChannelUpDownSwapped();
+
+            // If program list is visible, scroll it (affected by config)
+            if (mChannelListComponent.isProgramListVisible()) {
+                // UP: swapped means scroll down, else scroll up
+                mChannelListComponent.scrollProgramList(swapped);
+                return;
+            }
+
+            // Otherwise, navigate channel list (never affected by config)
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                // If swapped: UP means previous (index-1), else next (index+1)
-                if (swapped) {
-                    selected = (selected - 1 + count) % count;
-                } else {
-                    selected = (selected + 1) % count;
-                }
+                // Always: UP means next (index+1)
+                selected = (selected + 1) % count;
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
+            // No channel list visible: change channel (never affected by config)
             int count = mChannelRepository.getChannelCount();
             Log.d(TAG, "handleChannelUp: Channel list not visible, count=" + count);
             if (count > 0) {
-                if (swapped) {
-                    mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
-                } else {
-                    mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
-                }
+                // Always: UP means next
+                mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
                 Log.d(TAG, "handleChannelUp: Calling playChannel with index=" + mCurrentChannelIndex);
                 playChannel(mCurrentChannelIndex);
             }
@@ -211,28 +214,30 @@ public class MainActivity extends Activity {
         }
         mLastChannelSwitchTime = now;
 
-        boolean swapped = AppConfig.isChannelUpDownSwapped();
-
         if (mChannelListVisible && mChannelListComponent != null) {
+            boolean swapped = AppConfig.isChannelUpDownSwapped();
+
+            // If program list is visible, scroll it (affected by config)
+            if (mChannelListComponent.isProgramListVisible()) {
+                // DOWN: swapped means scroll up, else scroll down
+                mChannelListComponent.scrollProgramList(!swapped);
+                return;
+            }
+
+            // Otherwise, navigate channel list (never affected by config)
             int selected = mChannelListComponent.getSelectedChannelIndex();
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                // If swapped: DOWN means next (index+1), else previous (index-1)
-                if (swapped) {
-                    selected = (selected + 1) % count;
-                } else {
-                    selected = (selected - 1 + count) % count;
-                }
+                // Always: DOWN means previous (index-1)
+                selected = (selected - 1 + count) % count;
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
+            // No channel list visible: change channel (never affected by config)
             int count = mChannelRepository.getChannelCount();
             if (count > 0) {
-                if (swapped) {
-                    mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
-                } else {
-                    mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
-                }
+                // Always: DOWN means previous
+                mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
                 playChannel(mCurrentChannelIndex);
             }
         }

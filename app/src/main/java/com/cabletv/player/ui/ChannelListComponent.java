@@ -171,6 +171,28 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         return mSelectedChannelIndex;
     }
 
+    public boolean isProgramListVisible() {
+        return mProgramListVisible;
+    }
+
+    public void scrollProgramList(boolean down) {
+        if (!mProgramListVisible || mProgramRecyclerView == null) {
+            return;
+        }
+        LinearLayoutManager layoutManager =
+            (LinearLayoutManager) mProgramRecyclerView.getLayoutManager();
+        if (layoutManager != null) {
+            int currentPosition = layoutManager.findFirstVisibleItemPosition();
+            if (down) {
+                mProgramRecyclerView.smoothScrollToPosition(currentPosition + 1);
+            } else {
+                if (currentPosition > 0) {
+                    mProgramRecyclerView.smoothScrollToPosition(currentPosition - 1);
+                }
+            }
+        }
+    }
+
     @Override
     public void attach(@NonNull ControlWrapper controlWrapper) {
         // Already attached in constructor
