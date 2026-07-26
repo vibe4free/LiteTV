@@ -89,17 +89,20 @@ public class MainActivity extends Activity {
         mChannelRepository.reload();
 
         // Check EPG cache and preload if needed
+        Log.d(TAG, "Checking EPG cache validity...");
         if (!AppConfig.isEpgCacheValid()) {
-            Log.d(TAG, "EPG cache is stale or missing, preloading...");
+            Log.d(TAG, "EPG cache is stale or missing, preloading from network...");
             new Thread(() -> {
                 java.util.List<Channel> allChannels = mChannelRepository.getAllChannels();
                 if (allChannels != null && !allChannels.isEmpty()) {
                     mEpgManager.preloadEpgForAllChannels(allChannels);
-                    Log.d(TAG, "EPG preload completed");
+                    Log.d(TAG, "EPG preload from network completed");
                 }
             }).start();
         } else {
-            Log.d(TAG, "EPG cache is still valid");
+            Log.d(TAG, "EPG cache is still valid, loading from cache...");
+            // Try to load from cache file for faster startup
+            mEpgManager.loadFromCache();
         }
 
         // Set up audio manager for volume control
@@ -183,6 +186,7 @@ public class MainActivity extends Activity {
             if (mChannelListComponent.isProgramListVisible()) {
                 // UP: swapped means scroll down, else scroll up
                 mChannelListComponent.scrollProgramList(swapped);
+                Log.d(TAG, "handleChannelUp: Scrolling program list");
                 return;
             }
 
@@ -192,6 +196,7 @@ public class MainActivity extends Activity {
             if (count > 0) {
                 // Always: UP means next (index+1)
                 selected = (selected + 1) % count;
+                Log.d(TAG, "handleChannelUp: Selecting next channel: " + selected);
                 mChannelListComponent.selectChannel(selected);
             }
         } else {
@@ -297,13 +302,14 @@ public class MainActivity extends Activity {
             if (mVideoView.getParent() instanceof android.view.ViewGroup) {
                 android.view.ViewGroup parent = (android.view.ViewGroup) mVideoView.getParent();
                 if (parent instanceof FrameLayout) {
+                    // Menu width: 240 (channels) + 300 (programs) = 540dp
                     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                            dp2px(240), FrameLayout.LayoutParams.MATCH_PARENT);
+                            dp2px(540), FrameLayout.LayoutParams.MATCH_PARENT);
                     lp.gravity = android.view.Gravity.START;
                     mChannelListComponent.setLayoutParams(lp);
                 } else {
                     android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
-                            dp2px(240), android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
+                            dp2px(540), android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
                     mChannelListComponent.setLayoutParams(lp);
                 }
                 parent.addView(mChannelListComponent);

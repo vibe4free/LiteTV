@@ -39,6 +39,7 @@ public class EpgManager {
     private static final String TAG = "EpgManager";
     private final Context mContext;
     private final Map<String, List<Program>> mProgramsByChannel = new HashMap<>();
+    private final EpgCache mCache;
 
     public enum EpgSourceType {
         AUTO,           // Auto-detect based on URL
@@ -61,6 +62,7 @@ public class EpgManager {
 
     public EpgManager(Context context) {
         mContext = context.getApplicationContext();
+        mCache = new EpgCache(mContext);
     }
 
     public void loadEpg(Channel channel) {
@@ -82,6 +84,17 @@ public class EpgManager {
         Log.d(TAG, "Detected EPG source type: " + type + " for URL: " + epgUrl);
 
         loadEpgByType(channel, epgUrl, type);
+    }
+
+    public void loadFromCache() {
+        Log.d(TAG, "Loading EPG from cache file...");
+        Map<String, List<Program>> cached = mCache.loadPrograms();
+        if (cached != null && !cached.isEmpty()) {
+            mProgramsByChannel.putAll(cached);
+            Log.d(TAG, "✓ Loaded " + cached.size() + " channels from EPG cache");
+        } else {
+            Log.d(TAG, "No valid EPG cache found");
+        }
     }
 
     public void preloadEpgForAllChannels(java.util.List<Channel> channels) {
@@ -110,8 +123,7 @@ public class EpgManager {
             }
         }
 
-        AppConfig.setEpgLastUpdateTime(System.currentTimeMillis());
-        Log.d(TAG, "EPG preload completed at " + System.currentTimeMillis());
+        Log.d(TAG, "EPG preload initiated at " + System.currentTimeMillis());
     }
 
     private void loadAllXmltvEpg(java.util.List<Channel> channels, String xmltvUrl) {
@@ -139,6 +151,11 @@ public class EpgManager {
                         parseXmltvEpgFromDocument(channel, doc);
                     }
                 }
+
+                // Save EPG to cache after loading all channels
+                mCache.savePrograms(mProgramsByChannel);
+                AppConfig.setEpgLastUpdateTime(System.currentTimeMillis());
+                Log.d(TAG, "✓ EPG cache saved successfully");
             } catch (Exception e) {
                 Log.e(TAG, "Error loading all XMLTV EPG: " + e.getMessage(), e);
             }

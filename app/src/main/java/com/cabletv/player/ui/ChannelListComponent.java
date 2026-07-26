@@ -61,24 +61,25 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     }
 
     private void initView(Context context) {
+        // Expanded menu: 240dp channels on left + expandable programs on right
         setLayoutParams(new LayoutParams(dp2px(240), LayoutParams.MATCH_PARENT));
         setBackgroundColor(0xCC000000);
         setAlpha(AppConfig.getSidebarAlpha());
 
         LinearLayout mainContainer = new LinearLayout(context);
-        mainContainer.setOrientation(LinearLayout.VERTICAL);
+        mainContainer.setOrientation(LinearLayout.HORIZONTAL);
         mainContainer.setLayoutParams(new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        // Channel list section
+        // Channel list section (left side, fixed width)
         LinearLayout channelSection = new LinearLayout(context);
         channelSection.setOrientation(LinearLayout.VERTICAL);
-        channelSection.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 0.5f));
+        channelSection.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
 
         TextView titleView = new TextView(context);
         titleView.setText("Channels");
         titleView.setTextColor(0xFFFFFFFF);
         titleView.setTextSize(16);
-        titleView.setPadding(dp2px(16), dp2px(12), dp2px(16), dp2px(12));
+        titleView.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(12));
         titleView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         channelSection.addView(titleView);
 
@@ -86,14 +87,17 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
         mRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
         mRecyclerView.setBackgroundColor(0x00000000);
+        mRecyclerView.setFocusable(true);
+        mRecyclerView.setFocusableInTouchMode(true);
+        mRecyclerView.requestFocus();
         channelSection.addView(mRecyclerView);
 
         mainContainer.addView(channelSection);
 
-        // Program list section (initially hidden)
+        // Program list section (right side, initially hidden)
         mProgramListContainer = new LinearLayout(context);
         mProgramListContainer.setOrientation(LinearLayout.VERTICAL);
-        mProgramListContainer.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 0.5f));
+        mProgramListContainer.setLayoutParams(new LinearLayout.LayoutParams(dp2px(300), LayoutParams.MATCH_PARENT));
         mProgramListContainer.setBackgroundColor(0x99000000);
         mProgramListContainer.setVisibility(GONE);
 
@@ -101,7 +105,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         programTitle.setText("Today's Programs");
         programTitle.setTextColor(0xFFFFFFFF);
         programTitle.setTextSize(14);
-        programTitle.setPadding(dp2px(16), dp2px(12), dp2px(16), dp2px(8));
+        programTitle.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(8));
         programTitle.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         mProgramListContainer.addView(programTitle);
 
@@ -248,6 +252,8 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
         public void setEpgManager(EpgManager epgManager) {
             mEpgManager = epgManager;
+            // Refresh all items when EPG is set (in case it was loaded asynchronously)
+            notifyDataSetChanged();
         }
 
         public void updateData(List<Channel> channels, int currentIndex, int selectedIndex) {
