@@ -100,8 +100,15 @@ public class MainActivity extends Activity {
             }
         });
 
-        // Load channels from configured source or use test URL if none configured
+        // Load channels from the configured source; guide the user if there is none yet.
         String m3uUrl = AppConfig.getM3uUrl();
+        String m3uFilePath = AppConfig.getM3uFilePath();
+        if ((m3uUrl == null || m3uUrl.isEmpty()) && (m3uFilePath == null || m3uFilePath.isEmpty())) {
+            Log.w(TAG, "No M3U source configured");
+            android.widget.Toast.makeText(this,
+                    getString(R.string.no_playlist_configured, AppConfig.getWebServerPort()),
+                    android.widget.Toast.LENGTH_LONG).show();
+        }
 
         // Load EPG from cache first (if exists) for faster startup (stale-while-revalidate)
         Log.d(TAG, "Loading EPG from cache if available...");
