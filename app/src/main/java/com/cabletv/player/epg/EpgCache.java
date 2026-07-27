@@ -32,7 +32,8 @@ public class EpgCache {
     private static final String CACHE_DIR = "epg_cache";
     private static final String CACHE_FILE = "epg_programs.json";
     private static final String META_FILE = "epg_meta.json";
-    private static final int CACHE_VERSION = 1;
+    // 2: programmes are keyed by normalised channel name instead of the (non-unique) tvg-id.
+    private static final int CACHE_VERSION = 2;
 
     private final File mCacheDir;
     private final File mCacheFile;
@@ -57,6 +58,11 @@ public class EpgCache {
         long timestamp = System.currentTimeMillis();
         File tmp = new File(mCacheDir, CACHE_FILE + ".tmp");
         try {
+            // The system may wipe the cache directory while we are running, so re-create it here
+            // rather than trusting the one made in the constructor.
+            if (!mCacheDir.exists() && !mCacheDir.mkdirs()) {
+                throw new IOException("Cannot create EPG cache dir: " + mCacheDir);
+            }
             JsonObject root = new JsonObject();
             root.addProperty("version", CACHE_VERSION);
             root.addProperty("timestamp", timestamp);
@@ -186,28 +192,21 @@ public class EpgCache {
         return timestamp;
     }
 
-    public boolean isCacheValid(int validityHours) {
-        long cacheTimestamp = getCacheTimestamp();
-        if (cacheTimestamp == 0) {
-            return false;
-        }
-        long ageHours = (System.currentTimeMillis() - cacheTimestamp) / (1000 * 60 * 60);
-        return ageHours < validityHours;
-    }
-
-    public boolean isCacheTodayVersion() {
-        long cacheTimestamp = getCacheTimestamp();
-        if (cacheTimestamp == 0) {
+    /**
+     * The single freshness rule for EPG data: young enough, and from today. Both conditions
+     * matter — a feed downloaded at 23:50 yesterday is only minutes old but its programmes are
+     * already the wrong day's.
+     */
+    public boolean isFresh(int validityHours) {
+        long timestamp = getCacheTimestamp();
+        if (timestamp == 0) {
             Log.d(TAG, "No EPG cache timestamp available");
             return false;
         }
-        boolean isSameDay = isSameLocalDay(cacheTimestamp, System.currentTimeMillis());
-        Log.d(TAG, "Cache date check - Same day: " + isSameDay);
-        return isSameDay;
-    }
-
-    public boolean cacheFileExists() {
-        return mCacheFile.exists();
+        long ageHours = (System.currentTimeMillis() - timestamp) / (1000 * 60 * 60);
+        boolean fresh = ageHours < validityHours && isSameLocalDay(timestamp, System.currentTimeMillis());
+        Log.d(TAG, "EPG cache age " + ageHours + "h (limit " + validityHours + "h), fresh: " + fresh);
+        return fresh;
     }
 
     private void writeMeta(long timestamp) {

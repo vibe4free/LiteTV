@@ -111,16 +111,13 @@ public class MainActivity extends Activity {
                     mChannelListComponent.updateChannels(
                             mChannelRepository.getAllChannels(), mCurrentChannelIndex);
                 }
-                // Trigger EPG bulk preload now that channels are truly available (no race with
-                // reload()). It runs before playChannel() on purpose: the preload marks itself as
-                // running synchronously, so the per-channel load below sees it and does not
-                // download the same feed a second time.
-                if (!AppConfig.isEpgCacheValid()) {
-                    java.util.List<Channel> allChannels = mChannelRepository.getAllChannels();
-                    if (allChannels != null && !allChannels.isEmpty()) {
-                        Log.d(TAG, "Triggering EPG bulk preload for " + allChannels.size() + " channels");
-                        mEpgManager.preloadEpgForAllChannels(allChannels);
-                    }
+                // Hand the channels to the EPG manager now that they are truly available (no
+                // race with reload()). It decides for itself whether the cache still serves or
+                // the feed has to be fetched, and it runs before playChannel() so the load
+                // triggered by the first channel is recognised as the same one.
+                java.util.List<Channel> allChannels = mChannelRepository.getAllChannels();
+                if (allChannels != null && !allChannels.isEmpty()) {
+                    mEpgManager.preloadEpgForAllChannels(allChannels);
                 }
                 playChannel(mCurrentChannelIndex);
             }
@@ -148,10 +145,6 @@ public class MainActivity extends Activity {
                     android.widget.Toast.LENGTH_LONG).show();
         }
 
-        // Load EPG from cache first (if exists) for faster startup (stale-while-revalidate)
-        Log.d(TAG, "Loading EPG from cache if available...");
-        mEpgManager.loadFromCache();
-
         mChannelRepository.reload();
 
         // Set up audio manager for volume control
@@ -170,9 +163,14 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onEpgUrlChanged(String newUrl) {
-                    Log.d(TAG, "EPG URL changed: " + newUrl);
-                    // Invalidate EPG cache to force refresh on next app start
-                    AppConfig.setEpgLastUpdateTime(0);
+                    Log.d(TAG, "EPG URL changed, reloading EPG: " + newUrl);
+                    mEpgManager.onEpgSourceChanged();
+                    // Per-channel sources load lazily, so ask for the channel on screen right
+                    // away instead of leaving its info bar empty until the user navigates.
+                    Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
+                    if (current != null) {
+                        mEpgManager.loadEpg(current);
+                    }
                 }
             });
         }
@@ -531,7 +529,7 @@ public class MainActivity extends Activity {
             mChannelsChangedListener = null;
         }
         mChannelRepository.clearListeners();
-        mEpgManager.setOnEpgUpdatedListener(null);
+        mEpgManager.shutdown();
         if (mVideoView != null) {
             mVideoView.release();
         }

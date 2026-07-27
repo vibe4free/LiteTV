@@ -12,7 +12,6 @@ public class AppConfig {
     private static final String SIDEBAR_ALPHA_KEY = "app_sidebar_alpha";
     private static final String M3U_FILE_PATH_KEY = "app_m3u_file_path";
     private static final String EPG_DISPLAY_KEY = "app_epg_display_enabled";
-    private static final String EPG_LAST_UPDATE_KEY = "app_epg_last_update";
     private static final String EPG_CACHE_VALIDITY_HOURS_KEY = "app_epg_cache_hours";
     private static final String LAST_CHANNEL_URL_KEY = "app_last_channel_url";
 
@@ -83,31 +82,14 @@ public class AppConfig {
         Hawk.put(EPG_DISPLAY_KEY, enabled);
     }
 
-    // EPG cache management
-    public static long getEpgLastUpdateTime() {
-        return Hawk.get(EPG_LAST_UPDATE_KEY, 0L);
-    }
-
-    public static void setEpgLastUpdateTime(long timestamp) {
-        Hawk.put(EPG_LAST_UPDATE_KEY, timestamp);
-    }
-
+    // EPG cache management. How old the data may get lives here; whether the data on disk is
+    // still usable is answered by EpgCache alone, so the two cannot disagree.
     public static int getEpgCacheValidityHours() {
         return Hawk.get(EPG_CACHE_VALIDITY_HOURS_KEY, DEFAULT_EPG_CACHE_HOURS);
     }
 
     public static void setEpgCacheValidityHours(int hours) {
         Hawk.put(EPG_CACHE_VALIDITY_HOURS_KEY, hours);
-    }
-
-    // Check if EPG cache is valid
-    public static boolean isEpgCacheValid() {
-        long lastUpdate = getEpgLastUpdateTime();
-        if (lastUpdate == 0) {
-            return false; // No cache yet
-        }
-        long cacheAgeHours = (System.currentTimeMillis() - lastUpdate) / (1000 * 60 * 60);
-        return cacheAgeHours < getEpgCacheValidityHours();
     }
 
     // Last played channel URL (for resume playback on app startup)

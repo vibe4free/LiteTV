@@ -128,7 +128,7 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
             return;
         }
 
-        EpgManager.Program currentProgram = mEpgManager.getCurrentProgramWithTime(mCurrentChannel);
+        EpgManager.Program currentProgram = mEpgManager.getCurrentProgram(mCurrentChannel);
         if (currentProgram != null && mCurrentProgramView != null) {
             mCurrentProgramView.setText(currentProgram.title);
 

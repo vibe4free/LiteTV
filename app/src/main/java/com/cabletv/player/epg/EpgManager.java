@@ -4,61 +4,100 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.util.Xml;
 
 import com.cabletv.player.config.AppConfig;
 import com.cabletv.player.model.Channel;
-import com.google.gson.JsonParser;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
+import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserException;
 
-import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStreamReader;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.PushbackInputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.HashSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-
+/**
+ * Loads programme data for the playlist's channels and answers "what is on now".
+ *
+ * <p>An XMLTV feed describes every channel in one document, so it is downloaded and parsed
+ * exactly once per session (or read from the on-disk cache) and streamed with a pull parser
+ * instead of being held as a DOM. DIYP sources are the opposite — one small request per
+ * channel — so those are fetched lazily as the user reaches a channel.
+ *
+ * <p>All network, parsing and cache work runs on a single background thread, which is what
+ * keeps duplicate downloads impossible without any locking.
+ */
 public class EpgManager {
     private static final String TAG = "EpgManager";
-    private final Context mContext;
-    private final Map<String, List<Program>> mProgramsByChannel = new ConcurrentHashMap<>();
+
+    private static final int CONNECT_TIMEOUT_MS = 15000;
+    private static final int READ_TIMEOUT_MS = 15000;
+    private static final int MAX_REDIRECTS = 5;
+    private static final int STREAM_BUFFER_BYTES = 32 * 1024;
+    private static final int MAX_DIYP_BYTES = 2 * 1024 * 1024;
+    /** Used when a feed gives no usable stop time for the last programme of a channel. */
+    private static final long DEFAULT_PROGRAM_DURATION_MS = 30 * 60 * 1000L;
+    /** How long to wait before retrying a failed bulk download, so channel surfing cannot spam it. */
+    private static final long BULK_RETRY_DELAY_MS = 60 * 1000L;
+    /** Lower bound between cache writes while per-channel DIYP results trickle in. */
+    private static final long DIYP_CACHE_SAVE_INTERVAL_MS = 15 * 1000L;
+
     private final EpgCache mCache;
-    private volatile boolean mBulkLoadInProgress = false;
-    private final Set<String> mLoadingTvgIds = Collections.synchronizedSet(new HashSet<>());
-    private OnEpgUpdatedListener mListener;
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
+    /** One thread for every download, parse and cache access: no duplicate work, no locks. */
+    private final ExecutorService mExecutor =
+            Executors.newSingleThreadExecutor(runnable -> new Thread(runnable, "epg"));
+    /** Programmes per channel key, sorted by start time. See {@link #channelKey(Channel)}. */
+    private final Map<String, List<Program>> mProgramsByChannel = new ConcurrentHashMap<>();
+    /** Channel keys with a DIYP request in flight; XMLTV needs no such set (one load covers all). */
+    private final Set<String> mPendingDiypKeys = Collections.synchronizedSet(new HashSet<String>());
+
+    private volatile OnEpgUpdatedListener mListener;
+    private volatile List<Channel> mKnownChannels = Collections.emptyList();
+    private volatile boolean mBulkLoadDone = false;
+    private volatile boolean mBulkLoadQueued = false;
+    private volatile long mBulkRetryAfter = 0;
+    /** Touched only from the EPG thread. */
+    private long mLastCacheSaveAt = 0;
 
     public interface OnEpgUpdatedListener {
         void onEpgUpdated();
     }
 
     public enum EpgSourceType {
-        AUTO,           // Auto-detect based on URL
-        DIYP,          // 51zmt DIYP JSON API
-        ZIP,           // ZIP package with XMLTV
-        XMLTV          // Direct XMLTV URL
+        DIYP,          // per-channel JSON API (51zmt / DIYP style)
+        ZIP,           // ZIP package containing an XMLTV document
+        XMLTV          // XMLTV document, optionally gzipped
     }
 
     public static class Program {
@@ -74,729 +113,947 @@ public class EpgManager {
     }
 
     public EpgManager(Context context) {
-        mContext = context.getApplicationContext();
-        mCache = new EpgCache(mContext);
+        mCache = new EpgCache(context.getApplicationContext());
     }
 
     public void setOnEpgUpdatedListener(OnEpgUpdatedListener listener) {
         mListener = listener;
     }
 
-    private void notifyEpgUpdated() {
-        if (mListener != null) {
-            new Handler(Looper.getMainLooper()).post(() -> {
-                if (mListener != null) {
-                    mListener.onEpgUpdated();
-                }
-            });
-        }
-    }
-
-    public void loadEpg(Channel channel) {
-        Log.d(TAG, "loadEpg called for channel: " + (channel != null ? channel.name : "null"));
-        if (channel == null || channel.tvgId == null || channel.tvgId.isEmpty()) {
-            Log.d(TAG, "Channel or tvgId is null/empty, returning");
+    /**
+     * Tells the manager which channels exist and starts loading their programmes.
+     * Safe to call again after the playlist changes.
+     */
+    public void preloadEpgForAllChannels(List<Channel> channels) {
+        if (channels == null || channels.isEmpty()) {
+            Log.d(TAG, "No channels to load EPG for");
             return;
         }
-
-        // Check if data already exists
-        List<Program> existing = mProgramsByChannel.get(channel.tvgId);
-        if (existing != null && !existing.isEmpty()) {
-            Log.d(TAG, "loadEpg: " + channel.name + " already has EPG data, skipping");
-            return;
-        }
-
-        // Check if bulk load is in progress
-        if (mBulkLoadInProgress) {
-            Log.d(TAG, "loadEpg: Bulk load in progress, skipping per-channel load for " + channel.name);
-            return;
-        }
-
-        // Check if this channel is already being loaded
-        if (!mLoadingTvgIds.add(channel.tvgId)) {
-            Log.d(TAG, "loadEpg: " + channel.name + " is already being loaded, skipping duplicate");
-            return;
+        List<Channel> previous = mKnownChannels;
+        mKnownChannels = Collections.unmodifiableList(new ArrayList<>(channels));
+        if (!previous.isEmpty() && !sameChannels(previous, mKnownChannels)) {
+            // Programmes are keyed by playlist channel, so a different playlist needs a fresh
+            // match: keeping the old cache would leave the new channels blank until it expired.
+            Log.d(TAG, "Playlist changed, discarding matched EPG data");
+            mProgramsByChannel.clear();
+            mBulkLoadDone = false;
+            mBulkRetryAfter = 0;
+            submit(mCache::clearCache);
         }
 
         String epgUrl = AppConfig.getEpgUrl();
-        Log.d(TAG, "EPG URL from config: " + epgUrl);
         if (epgUrl == null || epgUrl.isEmpty()) {
-            Log.d(TAG, "EPG URL is empty, returning");
-            mLoadingTvgIds.remove(channel.tvgId);
+            Log.d(TAG, "No EPG URL configured");
             return;
         }
 
-        // Detect format based on URL
-        EpgSourceType type = detectEpgSourceType(epgUrl);
-        Log.d(TAG, "Detected EPG source type: " + type + " for URL: " + epgUrl);
-
-        loadEpgByType(channel, epgUrl, type);
+        if (detectEpgSourceType(epgUrl) == EpgSourceType.DIYP) {
+            // One request per channel: fetching 150 of them up front would be far worse than
+            // loading each channel when the user actually reaches it.
+            Log.d(TAG, "DIYP source: loading cache now, channels on demand");
+            submit(this::loadCacheIntoMemory);
+            return;
+        }
+        Log.d(TAG, "Requesting EPG for " + channels.size() + " channels from " + epgUrl);
+        ensureBulkLoad(epgUrl);
     }
 
     /**
-     * Reads the cached EPG in the background; listeners are notified once it is in memory.
-     * The cache can be several MB, so it must never be parsed on the main thread.
+     * Makes sure the given channel has programmes, if that is cheap. For an XMLTV source this
+     * only ever triggers the one bulk load; it never re-downloads the feed per channel.
      */
-    public void loadFromCache() {
-        new Thread(this::loadFromCacheBlocking, "epg-cache-load").start();
-    }
-
-    private void loadFromCacheBlocking() {
-        Log.d(TAG, "Loading EPG from cache file...");
-        Map<String, List<Program>> cached = mCache.loadPrograms();
-        if (cached != null && !cached.isEmpty()) {
-            mProgramsByChannel.putAll(cached);
-            Log.d(TAG, "✓ Loaded " + cached.size() + " channels from EPG cache");
-        } else {
-            Log.d(TAG, "No valid EPG cache found");
-        }
-        notifyEpgUpdated();
-    }
-
-    public void preloadEpgForAllChannels(java.util.List<Channel> channels) {
-        if (channels == null || channels.isEmpty()) {
-            Log.d(TAG, "No channels to preload EPG for");
+    public void loadEpg(Channel channel) {
+        if (channel == null) {
             return;
         }
-
-        final String epgUrl = AppConfig.getEpgUrl();
+        String key = channelKey(channel);
+        if (key == null) {
+            return;
+        }
+        List<Program> existing = mProgramsByChannel.get(key);
+        if (existing != null && !existing.isEmpty()) {
+            return;
+        }
+        String epgUrl = AppConfig.getEpgUrl();
         if (epgUrl == null || epgUrl.isEmpty()) {
-            Log.d(TAG, "EPG URL is empty, cannot preload");
             return;
         }
-
-        Log.d(TAG, "Starting EPG preload for " + channels.size() + " channels");
-        // Claim the bulk load before going async, otherwise the per-channel load kicked off by
-        // the first playChannel() would fetch the very same feed a second time.
-        mBulkLoadInProgress = true;
-        final java.util.List<Channel> snapshot = new ArrayList<>(channels);
-        new Thread(() -> {
-            try {
-                // Freshness check and cache read are both file IO; they belong here, not on the
-                // caller's thread (which is now the main thread).
-                if (mCache.isCacheTodayVersion()) {
-                    Log.d(TAG, "Using cached EPG data from today, skipping download");
-                    loadFromCacheBlocking();
-                    return;
-                }
-
-                Log.d(TAG, "EPG cache outdated or missing, downloading new data");
-                EpgSourceType type = detectEpgSourceType(epgUrl);
-                if (type == EpgSourceType.XMLTV) {
-                    // For XMLTV, we can load all channels from a single download
-                    loadAllXmltvEpgBlocking(snapshot, epgUrl);
-                } else {
-                    // For other formats, load each channel individually
-                    for (Channel channel : snapshot) {
-                        if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
-                            loadEpgByType(channel, epgUrl, type);
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error during EPG preload: " + e.getMessage(), e);
-            } finally {
-                mBulkLoadInProgress = false;
-                notifyEpgUpdated();
-                Log.d(TAG, "EPG preload finished, notifying listeners");
-            }
-        }, "epg-preload").start();
-    }
-
-    /** Runs on the caller's thread; only called from the preload worker. */
-    private void loadAllXmltvEpgBlocking(java.util.List<Channel> channels, String xmltvUrl) {
-        try {
-            byte[] data = fetchUrlAsBytes(xmltvUrl);
-            if (data == null) {
-                Log.e(TAG, "Failed to fetch XMLTV data");
-                return;
-            }
-
-            if (isGzipCompressed(data)) {
-                Log.d(TAG, "Content is gzip compressed, decompressing...");
-                String decompressed = decompressGzip(data);
-                data = decompressed.getBytes("UTF-8");
-            }
-
-            Document doc = parseXmlSafely(data);
-
-            Log.d(TAG, "Parsing XMLTV EPG for all channels");
-            for (Channel channel : channels) {
-                if (channel != null && channel.tvgId != null && !channel.tvgId.isEmpty()) {
-                    parseXmltvEpgFromDocument(channel, doc);
-                }
-            }
-
-            // Save EPG to cache after loading all channels
-            mCache.savePrograms(mProgramsByChannel);
-            AppConfig.setEpgLastUpdateTime(System.currentTimeMillis());
-            Log.d(TAG, "✓ EPG cache saved successfully");
-        } catch (Exception e) {
-            Log.e(TAG, "Error loading all XMLTV EPG: " + e.getMessage(), e);
+        if (detectEpgSourceType(epgUrl) == EpgSourceType.DIYP) {
+            loadDiypChannel(channel, epgUrl, key);
+        } else {
+            ensureBulkLoad(epgUrl);
         }
     }
 
-    private void parseXmltvEpgFromDocument(Channel channel, Document doc) {
-        try {
-            Log.d(TAG, "parseXmltvEpgFromDocument: Starting for " + channel.name + ", tvgId=" + channel.tvgId);
+    /** The EPG URL changed: throw away what we have and reload from the new source. */
+    public void onEpgSourceChanged() {
+        Log.d(TAG, "EPG source changed, dropping cached programmes");
+        mProgramsByChannel.clear();
+        mBulkLoadDone = false;
+        mBulkRetryAfter = 0;
+        submit(mCache::clearCache);
+        notifyEpgUpdated();
 
-            String channelId = findChannelIdByName(doc, channel);
-            if (channelId == null) {
-                Log.w(TAG, "Channel not found in XMLTV for: " + channel.name + " (tvgId: " + channel.tvgId + ")");
-                return;
-            }
-
-            Log.d(TAG, "Found channel ID: " + channelId + " for channel: " + channel.name);
-
-            NodeList programmes = doc.getElementsByTagName("programme");
-            long currentTime = System.currentTimeMillis();
-
-            List<Program> programList = new ArrayList<>();
-            int matchedCount = 0;
-            for (int i = 0; i < programmes.getLength(); i++) {
-                Element prog = (Element) programmes.item(i);
-                String progChannel = prog.getAttribute("channel");
-
-                if (!progChannel.equals(channelId)) {
-                    continue;
-                }
-
-                matchedCount++;
-
-                try {
-                    long startTime = parseXmltvTime(prog.getAttribute("start"));
-                    long stopTime = parseXmltvTime(prog.getAttribute("stop"));
-
-                    String title = "";
-                    NodeList titleNodes = prog.getElementsByTagName("title");
-                    if (titleNodes.getLength() > 0) {
-                        title = titleNodes.item(0).getTextContent();
-                    }
-
-                    if (title != null && !title.isEmpty()) {
-                        Program program = new Program(title, startTime, stopTime);
-                        programList.add(program);
-                    }
-                } catch (Exception e) {
-                    Log.d(TAG, "Error parsing programme " + i + ": " + e.getMessage());
-                }
-            }
-
-            if (!programList.isEmpty()) {
-                mProgramsByChannel.put(channel.tvgId, programList);
-                Log.d(TAG, "Stored " + programList.size() + " programs for " + channel.name);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error parsing XMLTV EPG from document: " + e.getMessage(), e);
+        String epgUrl = AppConfig.getEpgUrl();
+        if (epgUrl != null && !epgUrl.isEmpty()
+                && detectEpgSourceType(epgUrl) != EpgSourceType.DIYP
+                && !mKnownChannels.isEmpty()) {
+            ensureBulkLoad(epgUrl);
         }
     }
 
-    private EpgSourceType detectEpgSourceType(String url) {
-        if (url.contains("diyp")) {
-            return EpgSourceType.DIYP;
-        } else if (url.contains("zip")) {
-            return EpgSourceType.ZIP;
-        } else if (url.contains("xml") || url.endsWith(".gz") || url.endsWith(".xml")) {
-            return EpgSourceType.XMLTV;
-        }
-        // Default to DIYP for 51zmt API style
-        return EpgSourceType.DIYP;
+    /** Stops all pending EPG work. Call from the owning Activity's onDestroy(). */
+    public void shutdown() {
+        mListener = null;
+        mExecutor.shutdownNow();
     }
 
-    private void loadEpgByType(Channel channel, String epgUrl, EpgSourceType type) {
-        new Thread(() -> {
-            try {
-                switch (type) {
-                    case DIYP:
-                        loadDiypEpg(channel, epgUrl);
-                        break;
-                    case ZIP:
-                        loadZipEpg(channel, epgUrl);
-                        break;
-                    case XMLTV:
-                        loadXmltvEpg(channel, epgUrl);
-                        break;
-                    default:
-                        loadDiypEpg(channel, epgUrl);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error loading EPG for " + channel.name, e);
-            } finally {
-                mLoadingTvgIds.remove(channel.tvgId);
-                notifyEpgUpdated();
-                Log.d(TAG, "Per-channel EPG load completed for " + channel.name + ", notifying listeners");
-            }
-        }).start();
-    }
-
-    private void loadDiypEpg(Channel channel, String baseUrl) {
-        try {
-            String date = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
-            String url = baseUrl.replace("{name}", channel.tvgId).replace("{date}", date);
-
-            String content = fetchUrl(url);
-            if (content != null && !content.isEmpty()) {
-                Log.d(TAG, "DIYP EPG response length: " + content.length());
-                parseJsonEpg(channel, content);
-                Log.d(TAG, "DIYP EPG loaded for channel: " + channel.name);
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "Error loading DIYP EPG for " + channel.name, e);
-        }
-    }
-
-    private void loadZipEpg(Channel channel, String baseUrl) {
-        try {
-            Log.d(TAG, "ZIP EPG format support prepared (requires additional implementation)");
-            // TODO: Implement ZIP package download and extraction
-            // Format: Download zip from URL, extract XMLTV files, parse by channel
-        } catch (Exception e) {
-            Log.w(TAG, "Error loading ZIP EPG for " + channel.name, e);
-        }
-    }
-
-    private void loadXmltvEpg(Channel channel, String xmltvUrl) {
-        try {
-            Log.d(TAG, "loadXmltvEpg: Starting for channel " + channel.name + " from " + xmltvUrl);
-            byte[] content = fetchUrlAsBytes(xmltvUrl);
-            if (content != null && content.length > 0) {
-                Log.d(TAG, "XMLTV EPG response length: " + content.length + " bytes");
-                String xmlString;
-
-                // Check if content is gzip compressed
-                if (isGzipCompressed(content)) {
-                    Log.d(TAG, "Content is gzip compressed, decompressing...");
-                    xmlString = decompressGzip(content);
-                    Log.d(TAG, "Decompressed to: " + xmlString.length() + " characters");
-                } else {
-                    Log.d(TAG, "Content is not compressed, parsing as UTF-8");
-                    xmlString = new String(content, "UTF-8");
-                }
-
-                Log.d(TAG, "Starting XMLTV XML parsing...");
-                parseXmltvEpg(channel, xmlString);
-                Log.d(TAG, "XMLTV EPG loaded for channel: " + channel.name);
-            } else {
-                Log.w(TAG, "XMLTV EPG response is empty for channel: " + channel.name);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error loading XMLTV EPG for " + channel.name + ": " + e.getMessage(), e);
-        }
-    }
-
-    private void parseJsonEpg(Channel channel, String json) {
-        try {
-            JsonElement element = JsonParser.parseString(json);
-            Log.d(TAG, "Parsing EPG JSON for " + channel.name);
-
-            if (element.isJsonObject()) {
-                JsonObject obj = element.getAsJsonObject();
-                if (obj.has("epg_data") && obj.get("epg_data").isJsonArray()) {
-                    JsonArray programs = obj.getAsJsonArray("epg_data");
-                    parseArray(channel, programs);
-                }
-            } else if (element.isJsonArray()) {
-                JsonArray programs = element.getAsJsonArray();
-                parseArray(channel, programs);
-            }
-        } catch (Exception e) {
-            Log.d(TAG, "Failed to parse EPG JSON: " + e.getMessage());
-        }
-    }
-
-    private void parseArray(Channel channel, JsonArray programs) {
-        List<Program> programList = new ArrayList<>();
-        for (int i = 0; i < programs.size(); i++) {
-            try {
-                JsonObject prog = programs.get(i).getAsJsonObject();
-                String title = null;
-
-                // Try different field names for program title
-                if (prog.has("节目名")) {
-                    title = prog.get("节目名").getAsString();
-                } else if (prog.has("name")) {
-                    title = prog.get("name").getAsString();
-                } else if (prog.has("title")) {
-                    title = prog.get("title").getAsString();
-                }
-
-                if (title != null && !title.isEmpty()) {
-                    Program program = new Program(title, 0, 0);
-                    programList.add(program);
-                }
-            } catch (Exception e) {
-                Log.d(TAG, "Error parsing program " + i + ": " + e.getMessage());
-            }
-        }
-
-        if (!programList.isEmpty()) {
-            mProgramsByChannel.put(channel.tvgId, programList);
-            Log.d(TAG, "Stored " + programList.size() + " programs for " + channel.name);
-        }
-    }
+    // ---------------------------------------------------------------- queries
 
     public Program getCurrentProgram(Channel channel) {
-        if (channel == null) {
-            return null;
+        List<Program> programs = programsFor(channel);
+        long now = System.currentTimeMillis();
+        for (Program program : programs) {
+            if (now >= program.startTime && now < program.endTime) {
+                return program;
+            }
+            if (program.startTime > now) {
+                break; // sorted by start time: nothing later can contain "now"
+            }
         }
-        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
-        if (programs == null || programs.isEmpty()) {
-            return null;
-        }
-        return programs.get(0);
+        return null;
     }
 
     public Program getNextProgram(Channel channel) {
-        if (channel == null) {
-            return null;
+        long now = System.currentTimeMillis();
+        for (Program program : programsFor(channel)) {
+            if (program.startTime > now) {
+                return program;
+            }
         }
-        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
-        if (programs == null || programs.size() < 2) {
-            return null;
-        }
-        return programs.get(1);
+        return null;
     }
 
     public List<Program> getAllPrograms(Channel channel) {
-        if (channel == null) {
-            return new ArrayList<>();
-        }
-        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
-        return programs != null ? programs : new ArrayList<>();
+        return programsFor(channel);
     }
 
     public String getCurrentProgramInfo(Channel channel) {
-        Program program = getCurrentProgramWithTime(channel);
-        if (program != null) {
-            return program.title;
-        }
-        return null;
+        Program program = getCurrentProgram(channel);
+        return program != null ? program.title : null;
     }
 
     public String getNextProgramInfo(Channel channel) {
         Program program = getNextProgram(channel);
-        if (program != null) {
-            return program.title;
-        }
-        return null;
+        return program != null ? program.title : null;
     }
 
-    public Program getCurrentProgramWithTime(Channel channel) {
+    private List<Program> programsFor(Channel channel) {
         if (channel == null) {
-            return null;
+            return Collections.emptyList();
         }
-        List<Program> programs = mProgramsByChannel.get(channel.tvgId);
-        if (programs == null || programs.isEmpty()) {
-            return null;
+        String key = channelKey(channel);
+        if (key == null) {
+            return Collections.emptyList();
         }
+        List<Program> programs = mProgramsByChannel.get(key);
+        return programs != null ? programs : Collections.<Program>emptyList();
+    }
 
-        long currentTime = System.currentTimeMillis();
-        for (Program program : programs) {
-            if (currentTime >= program.startTime && currentTime < program.endTime) {
-                return program;
+    // ------------------------------------------------------------ bulk loading
+
+    private void ensureBulkLoad(final String epgUrl) {
+        if (mBulkLoadDone || mBulkLoadQueued) {
+            return;
+        }
+        if (System.currentTimeMillis() < mBulkRetryAfter) {
+            Log.d(TAG, "Bulk EPG load failed recently, not retrying yet");
+            return;
+        }
+        mBulkLoadQueued = true;
+        submit(() -> {
+            boolean loaded = false;
+            try {
+                loaded = runBulkLoad(epgUrl);
+            } catch (Exception e) {
+                Log.e(TAG, "EPG load failed: " + e.getMessage(), e);
+            } finally {
+                mBulkLoadQueued = false;
+                mBulkLoadDone = loaded;
+                mBulkRetryAfter = loaded ? 0 : System.currentTimeMillis() + BULK_RETRY_DELAY_MS;
+                notifyEpgUpdated();
             }
-        }
-
-        return programs.get(0);
+        });
     }
 
-    public String getSupportedFormats() {
-        return "DIYP (51zmt JSON API), ZIP (package with XMLTV), XMLTV (direct XML, gzip supported)";
-    }
-
-    private byte[] fetchUrlAsBytes(String urlString) {
-        return fetchUrlAsBytesWithRedirect(urlString, 0);
-    }
-
-    private byte[] fetchUrlAsBytesWithRedirect(String urlString, int redirectCount) {
-        if (redirectCount > 5) {
-            Log.e(TAG, "Too many redirects!");
-            return null;
-        }
-
-        try {
-            Log.d(TAG, "fetchUrlAsBytes: Starting download from " + urlString + " (redirect #" + redirectCount + ")");
-            URL url = new URL(urlString);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(15000);
-            connection.setReadTimeout(15000);
-            connection.setInstanceFollowRedirects(false);
-
-            Log.d(TAG, "Connection opened, sending request...");
-            int responseCode = connection.getResponseCode();
-            Log.d(TAG, "Response code: " + responseCode);
-
-            if (responseCode >= 300 && responseCode < 400) {
-                String redirectLocation = connection.getHeaderField("Location");
-                Log.d(TAG, "HTTP redirect " + responseCode + " to: " + redirectLocation);
-                if (redirectLocation != null && !redirectLocation.isEmpty()) {
-                    return fetchUrlAsBytesWithRedirect(redirectLocation, redirectCount + 1);
-                }
-                return null;
-            } else if (responseCode == HttpURLConnection.HTTP_OK) {
-                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-                int read;
-                byte[] data = new byte[16384];
-                int totalRead = 0;
-
-                java.io.InputStream is = connection.getInputStream();
-                while ((read = is.read(data)) != -1) {
-                    buffer.write(data, 0, read);
-                    totalRead += read;
-                    if (totalRead % (100 * 1024) == 0) {
-                        Log.d(TAG, "Read " + (totalRead / 1024) + " KB so far...");
-                    }
-                }
-                is.close();
-
-                byte[] result = buffer.toByteArray();
-                Log.d(TAG, "✓ Successfully fetched " + result.length + " bytes");
-                return result;
-            } else {
-                Log.e(TAG, "HTTP error: " + responseCode + " " + connection.getResponseMessage());
-                return null;
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error fetching URL: " + urlString + " - " + e.getMessage(), e);
-        }
-        return null;
-    }
-
-    private boolean isGzipCompressed(byte[] data) {
-        if (data == null || data.length < 2) {
+    /** Runs on the EPG thread. Returns true when programmes are in memory. */
+    private boolean runBulkLoad(String epgUrl) throws IOException, XmlPullParserException {
+        List<Channel> channels = mKnownChannels;
+        if (channels.isEmpty()) {
+            Log.d(TAG, "No known channels yet, skipping EPG load");
             return false;
         }
-        return (data[0] == (byte) 0x1f) && (data[1] == (byte) 0x8b);
-    }
 
-    private String decompressGzip(byte[] compressed) throws Exception {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        GZIPInputStream gis = new GZIPInputStream(new java.io.ByteArrayInputStream(compressed));
-        byte[] buffer = new byte[1024];
-        int len;
-        while ((len = gis.read(buffer)) != -1) {
-            out.write(buffer, 0, len);
+        if (mCache.isFresh(AppConfig.getEpgCacheValidityHours()) && loadCacheIntoMemory()) {
+            Log.d(TAG, "Using cached EPG, no download needed");
+            return true;
         }
-        gis.close();
-        return out.toString("UTF-8");
+
+        EpgSourceType type = detectEpgSourceType(epgUrl);
+        Log.d(TAG, "Downloading EPG (" + type + ") from " + epgUrl);
+        Map<String, List<Program>> parsed = downloadAndParseXmltv(epgUrl, type, channels);
+        if (parsed.isEmpty()) {
+            Log.w(TAG, "EPG contained no programmes for any of our " + channels.size() + " channels");
+            return false;
+        }
+
+        mProgramsByChannel.putAll(parsed);
+        Log.i(TAG, "✓ EPG loaded for " + parsed.size() + "/" + channels.size() + " channels");
+        mCache.savePrograms(mProgramsByChannel);
+        return true;
     }
 
-    /**
-     * Parses XMLTV with external entity resolution disabled. Doctypes are rejected
-     * outright first; since many legitimate XMLTV feeds declare
-     * {@code <!DOCTYPE tv SYSTEM "xmltv.dtd">}, a doctype failure falls back to a
-     * parser that tolerates the declaration but still refuses to fetch anything it
-     * points at.
-     */
-    private Document parseXmlSafely(byte[] xml) throws Exception {
-        try {
-            return newSafeDocumentBuilder(true).parse(new java.io.ByteArrayInputStream(xml));
-        } catch (SAXException e) {
-            String message = e.getMessage() == null ? "" : e.getMessage().toUpperCase(Locale.US);
-            if (!message.contains("DOCTYPE") && !message.contains("DTD")) {
-                throw e;
+    /** Reads the cache into memory. Returns true if anything was found. Runs on the EPG thread. */
+    private boolean loadCacheIntoMemory() {
+        Map<String, List<Program>> cached = mCache.loadPrograms();
+        if (cached == null || cached.isEmpty()) {
+            Log.d(TAG, "No usable EPG cache");
+            return false;
+        }
+        for (Map.Entry<String, List<Program>> entry : cached.entrySet()) {
+            List<Program> programs = entry.getValue();
+            if (programs != null && !programs.isEmpty()) {
+                mProgramsByChannel.put(entry.getKey(), Collections.unmodifiableList(programs));
             }
-            Log.w(TAG, "EPG declares a DOCTYPE; retrying with external entities blocked");
-            return newSafeDocumentBuilder(false).parse(new java.io.ByteArrayInputStream(xml));
+        }
+        Log.d(TAG, "✓ EPG cache loaded for " + cached.size() + " channels");
+        notifyEpgUpdated();
+        return true;
+    }
+
+    private Map<String, List<Program>> downloadAndParseXmltv(
+            String epgUrl, EpgSourceType type, List<Channel> channels)
+            throws IOException, XmlPullParserException {
+        Map<String, List<String>> lookup = buildChannelLookup(channels);
+        HttpURLConnection connection = openConnection(epgUrl);
+        InputStream stream = null;
+        try {
+            stream = new BufferedInputStream(connection.getInputStream(), STREAM_BUFFER_BYTES);
+            stream = type == EpgSourceType.ZIP ? openXmlFromZip(stream) : maybeGunzip(stream);
+            Map<String, List<Program>> parsed = parseXmltv(stream, lookup);
+            finalizePrograms(parsed);
+            return parsed;
+        } finally {
+            closeQuietly(stream);
+            connection.disconnect();
         }
     }
 
     /**
-     * XMLTV data comes from a remote, cleartext HTTP source, so the parser must not
-     * be allowed to resolve external entities (XXE / SSRF / entity expansion).
-     * Feature support varies between XML implementations, so each is applied
-     * best-effort and backed by an entity resolver that always returns nothing.
+     * Streams the feed with a pull parser, keeping only the programmes of channels we have.
+     * The previous implementation built a DOM of the whole document (~20 000 elements for a
+     * 3 MB feed) and then re-walked it once per channel.
+     *
+     * <p>XMLTV lists every {@code <channel>} before the first {@code <programme>}, so one
+     * forward pass is enough to resolve ids and collect programmes.
      */
-    private DocumentBuilder newSafeDocumentBuilder(boolean disallowDoctype) throws ParserConfigurationException {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        setFeatureQuietly(factory, "http://apache.org/xml/features/disallow-doctype-decl", disallowDoctype);
-        setFeatureQuietly(factory, "http://xml.org/sax/features/external-general-entities", false);
-        setFeatureQuietly(factory, "http://xml.org/sax/features/external-parameter-entities", false);
-        setFeatureQuietly(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        // Android's DocumentBuilderFactory throws UnsupportedOperationException for
-        // some of these, so every setter here is best-effort too. The entity resolver
-        // installed below is the implementation-independent guarantee.
-        trySet(factory, f -> f.setExpandEntityReferences(false), "expandEntityReferences");
-        trySet(factory, f -> f.setXIncludeAware(false), "xIncludeAware");
-        trySet(factory, f -> f.setValidating(false), "validating");
+    private Map<String, List<Program>> parseXmltv(InputStream stream, Map<String, List<String>> lookup)
+            throws XmlPullParserException, IOException {
+        XmlPullParser parser = Xml.newPullParser();
+        parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
+        // The pull parser never resolves external entities or fetches an external DTD, so the
+        // XXE/SSRF hardening the DOM parser needed does not apply here at all — which matters,
+        // because this document arrives over cleartext HTTP from a third party.
+        // Relaxed mode is best-effort: public feeds do contain stray "&" and HTML entities, and
+        // one of those should not throw away the other 20 000 programmes.
+        setFeatureQuietly(parser, "http://xmlpull.org/v1/doc/features.html#relaxed", true);
+        // Encoding comes from the XML declaration itself.
+        parser.setInput(stream, null);
 
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        builder.setEntityResolver((publicId, systemId) -> {
-            Log.w(TAG, "Blocked external entity in EPG XML: " + systemId);
-            return new InputSource(new java.io.ByteArrayInputStream(new byte[0]));
-        });
-        return builder;
+        Map<String, List<String>> xmltvIdToKeys = new HashMap<>();
+        Map<String, List<Program>> programsByChannel = new HashMap<>();
+        int channelCount = 0;
+        int programmeCount = 0;
+
+        int event = parser.getEventType();
+        while (event != XmlPullParser.END_DOCUMENT) {
+            if (event == XmlPullParser.START_TAG) {
+                String name = parser.getName();
+                if ("channel".equals(name)) {
+                    channelCount++;
+                    readChannelElement(parser, lookup, xmltvIdToKeys);
+                } else if ("programme".equals(name)) {
+                    programmeCount++;
+                    readProgrammeElement(parser, xmltvIdToKeys, programsByChannel);
+                }
+            }
+            event = parser.next();
+        }
+
+        Log.d(TAG, "Parsed " + channelCount + " channels / " + programmeCount + " programmes; "
+                + xmltvIdToKeys.size() + " feed channels matched our playlist");
+        return programsByChannel;
     }
 
-    private void setFeatureQuietly(DocumentBuilderFactory factory, String feature, boolean value) {
+    private static void setFeatureQuietly(XmlPullParser parser, String feature, boolean value) {
         try {
-            factory.setFeature(feature, value);
-        } catch (ParserConfigurationException | RuntimeException e) {
+            parser.setFeature(feature, value);
+        } catch (Exception e) {
             Log.d(TAG, "XML feature not supported by this parser: " + feature);
         }
     }
 
-    private interface FactorySetter {
-        void apply(DocumentBuilderFactory factory);
-    }
+    /** Parser is on a {@code <channel>} start tag; leaves it on the matching end tag. */
+    private void readChannelElement(XmlPullParser parser, Map<String, List<String>> lookup,
+                                    Map<String, List<String>> xmltvIdToKeys)
+            throws XmlPullParserException, IOException {
+        String id = parser.getAttributeValue(null, "id");
+        List<String> keys = matchChannelKeys(lookup, id);
+        List<String> displayNames = new ArrayList<>(2);
 
-    private void trySet(DocumentBuilderFactory factory, FactorySetter setter, String name) {
-        try {
-            setter.apply(factory);
-        } catch (RuntimeException e) {
-            Log.d(TAG, "XML setting not supported by this parser: " + name);
-        }
-    }
-
-    private void parseXmltvEpg(Channel channel, String xmlString) {
-        try {
-            Log.d(TAG, "parseXmltvEpg: Starting for " + channel.name + ", tvgId=" + channel.tvgId);
-            Document doc = parseXmlSafely(xmlString.getBytes("UTF-8"));
-
-            Log.d(TAG, "XML document parsed successfully");
-
-            // Count total channels and programmes for debugging
-            NodeList allChannels = doc.getElementsByTagName("channel");
-            Log.d(TAG, "Total channels in XMLTV: " + allChannels.getLength());
-
-            // Find the channel ID to match
-            String channelId = findChannelIdByName(doc, channel);
-            if (channelId == null) {
-                Log.w(TAG, "Channel not found in XMLTV for: " + channel.name + " (tvgId: " + channel.tvgId + ")");
-                return;
+        int depth = 1;
+        while (depth > 0) {
+            int event = parser.next();
+            if (event == XmlPullParser.END_DOCUMENT) {
+                break;
             }
-
-            Log.d(TAG, "Found channel ID " + channelId + " for channel: " + channel.name);
-
-            // Get current time
-            long currentTime = System.currentTimeMillis();
-            Log.d(TAG, "Current time: " + new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(currentTime)));
-
-            // Find matching programme for current time
-            NodeList programmes = doc.getElementsByTagName("programme");
-            Log.d(TAG, "Total programmes in XMLTV: " + programmes.getLength());
-
-            List<Program> programList = new ArrayList<>();
-            int matchedCount = 0;
-            for (int i = 0; i < programmes.getLength(); i++) {
-                Element prog = (Element) programmes.item(i);
-                String progChannel = prog.getAttribute("channel");
-
-                if (!progChannel.equals(channelId)) {
-                    continue;
+            if (event == XmlPullParser.START_TAG) {
+                if ("display-name".equals(parser.getName())) {
+                    displayNames.add(readElementText(parser));
+                } else {
+                    depth++;
                 }
+            } else if (event == XmlPullParser.END_TAG) {
+                depth--;
+            }
+        }
 
-                matchedCount++;
-
-                try {
-                    long startTime = parseXmltvTime(prog.getAttribute("start"));
-                    long stopTime = parseXmltvTime(prog.getAttribute("stop"));
-
-                    String title = "";
-                    NodeList titleNodes = prog.getElementsByTagName("title");
-                    if (titleNodes.getLength() > 0) {
-                        title = titleNodes.item(0).getTextContent();
-                    }
-
-                    if (title != null && !title.isEmpty()) {
-                        Program program = new Program(title, startTime, stopTime);
-                        programList.add(program);
-                        if (currentTime >= startTime && currentTime < stopTime) {
-                            Log.d(TAG, "✓ XMLTV program matched for " + channel.name + ": " + title);
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.d(TAG, "Error parsing programme " + i + ": " + e.getMessage());
+        if (keys == null) {
+            for (String displayName : displayNames) {
+                keys = matchChannelKeys(lookup, displayName);
+                if (keys != null) {
+                    break;
                 }
             }
-
-            if (!programList.isEmpty()) {
-                mProgramsByChannel.put(channel.tvgId, programList);
-                Log.d(TAG, "Stored " + programList.size() + " programs for " + channel.name);
-            } else {
-                Log.w(TAG, "No programmes found for current time in channel: " + channel.name + " (checked " + matchedCount + " programmes for this channel)");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error parsing XMLTV EPG: " + e.getMessage(), e);
-            e.printStackTrace();
+        }
+        if (keys != null && id != null && !xmltvIdToKeys.containsKey(id)) {
+            xmltvIdToKeys.put(id, keys);
         }
     }
 
-    private String findChannelIdByName(Document doc, Channel channel) {
-        NodeList channels = doc.getElementsByTagName("channel");
-        String channelName = channel.tvgId;
-        if (channelName == null || channelName.isEmpty()) {
-            channelName = channel.name;
-        }
+    /** Parser is on a {@code <programme>} start tag; leaves it on the matching end tag. */
+    private void readProgrammeElement(XmlPullParser parser, Map<String, List<String>> xmltvIdToKeys,
+                                      Map<String, List<Program>> programsByChannel)
+            throws XmlPullParserException, IOException {
+        String xmltvId = parser.getAttributeValue(null, "channel");
+        List<String> keys = xmltvId == null ? null : xmltvIdToKeys.get(xmltvId);
+        String start = parser.getAttributeValue(null, "start");
+        String stop = parser.getAttributeValue(null, "stop");
+        String title = null;
 
-        String channelNameLower = channelName.toLowerCase();
-
-        for (int i = 0; i < channels.getLength(); i++) {
-            Element channelElem = (Element) channels.item(i);
-            String id = channelElem.getAttribute("id");
-
-            NodeList displayNames = channelElem.getElementsByTagName("display-name");
-            for (int j = 0; j < displayNames.getLength(); j++) {
-                String displayName = displayNames.item(j).getTextContent();
-                if (displayName != null && displayName.toLowerCase().contains(channelNameLower)) {
-                    return id;
+        int depth = 1;
+        while (depth > 0) {
+            int event = parser.next();
+            if (event == XmlPullParser.END_DOCUMENT) {
+                break;
+            }
+            if (event == XmlPullParser.START_TAG) {
+                // Everything except the title of a channel we care about is skipped without
+                // materialising its text; most of the document is <desc> and <category>.
+                if (keys != null && title == null && "title".equals(parser.getName())) {
+                    title = readElementText(parser);
+                } else {
+                    depth++;
                 }
-            }
-
-            // Also try to match by numeric ID
-            if (channelName.matches("\\d+") && id.equals(channelName)) {
-                return id;
+            } else if (event == XmlPullParser.END_TAG) {
+                depth--;
             }
         }
 
-        return null;
+        if (keys == null || title == null || title.isEmpty()) {
+            return;
+        }
+        long startTime = parseXmltvTime(start);
+        if (startTime <= 0) {
+            return;
+        }
+        // One feed channel can serve several playlist entries ("四川卫视" and "四川卫视4K"),
+        // which share the programme instance.
+        Program program = new Program(title, startTime, parseXmltvTime(stop));
+        for (String key : keys) {
+            List<Program> programs = programsByChannel.get(key);
+            if (programs == null) {
+                programs = new ArrayList<>();
+                programsByChannel.put(key, programs);
+            }
+            programs.add(program);
+        }
     }
 
-    private long parseXmltvTime(String timeStr) {
+    /**
+     * Parser is on a start tag; returns its text content and leaves the parser on the
+     * matching end tag. Tolerates unexpected child elements, unlike {@code nextText()}.
+     */
+    private static String readElementText(XmlPullParser parser)
+            throws XmlPullParserException, IOException {
+        StringBuilder text = new StringBuilder();
+        int depth = 1;
+        while (depth > 0) {
+            int event = parser.next();
+            if (event == XmlPullParser.END_DOCUMENT) {
+                break;
+            }
+            if (event == XmlPullParser.START_TAG) {
+                depth++;
+            } else if (event == XmlPullParser.END_TAG) {
+                depth--;
+            } else if (event == XmlPullParser.TEXT && depth == 1) {
+                text.append(parser.getText());
+            }
+        }
+        return text.toString().trim();
+    }
+
+    // -------------------------------------------------------- channel matching
+
+    /**
+     * Builds normalised name/id → channel key index for the playlist. Matching is exact on
+     * the normalised form: the old "display name contains channel name" test happily bound
+     * CCTV1 to "1905环球经典" and then showed its programmes as CCTV1's.
+     */
+    private static Map<String, List<String>> buildChannelLookup(List<Channel> channels) {
+        Map<String, List<String>> lookup = new HashMap<>();
+        for (Channel channel : channels) {
+            if (channel == null) {
+                continue;
+            }
+            String key = channelKey(channel);
+            if (key == null) {
+                continue;
+            }
+            addLookupToken(lookup, channel.tvgId, key);
+            addLookupToken(lookup, channel.name, key);
+        }
+        return lookup;
+    }
+
+    private static void addLookupToken(Map<String, List<String>> lookup, String token, String key) {
+        String normalized = normalize(token);
+        if (normalized.isEmpty()) {
+            return;
+        }
+        addLookupEntry(lookup, normalized, key);
+        String stripped = stripQualitySuffix(normalized);
+        if (!stripped.equals(normalized)) {
+            addLookupEntry(lookup, stripped, key);
+        }
+    }
+
+    private static void addLookupEntry(Map<String, List<String>> lookup, String token, String key) {
+        List<String> keys = lookup.get(token);
+        if (keys == null) {
+            keys = new ArrayList<>(1);
+            lookup.put(token, keys);
+        } else if (keys.contains(key)) {
+            return;
+        }
+        keys.add(key);
+    }
+
+    private static List<String> matchChannelKeys(Map<String, List<String>> lookup, String token) {
+        String normalized = normalize(token);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        List<String> keys = lookup.get(normalized);
+        if (keys != null) {
+            return keys;
+        }
+        // "四川卫视4K" in the playlist and "四川卫视" in the feed are the same channel.
+        return lookup.get(stripQualitySuffix(normalized));
+    }
+
+    private static boolean sameChannels(List<Channel> first, List<Channel> second) {
+        if (first.size() != second.size()) {
+            return false;
+        }
+        Set<String> keys = new HashSet<>();
+        for (Channel channel : first) {
+            if (channel != null) {
+                keys.add(channelKey(channel));
+            }
+        }
+        for (Channel channel : second) {
+            if (channel != null && !keys.contains(channelKey(channel))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Programmes are stored per playlist channel, keyed by its normalised name. The tvg-id
+     * cannot be the key: playlists reuse ids across entries (90 distinct ids for 151 channels
+     * in the feed this was tested against), which silently merged unrelated programmes.
+     */
+    private static String channelKey(Channel channel) {
+        String key = normalize(channel.name);
+        if (key.isEmpty()) {
+            key = normalize(channel.tvgId);
+        }
+        return key.isEmpty() ? null : key;
+    }
+
+    /** Lowercase, with the separators that feeds and playlists disagree about removed. */
+    private static String normalize(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder normalized = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == ' ' || c == '\t' || c == '-' || c == '_' || c == '.' || c == '·') {
+                continue;
+            }
+            normalized.append(Character.toLowerCase(c));
+        }
+        return normalized.toString();
+    }
+
+    private static final String[] QUALITY_SUFFIXES =
+            {"4k", "8k", "uhd", "fhd", "hd", "超清", "高清", "标清", "蓝光"};
+
+    private static String stripQualitySuffix(String normalized) {
+        for (String suffix : QUALITY_SUFFIXES) {
+            if (normalized.length() > suffix.length() && normalized.endsWith(suffix)) {
+                return normalized.substring(0, normalized.length() - suffix.length());
+            }
+        }
+        return normalized;
+    }
+
+    // ------------------------------------------------------------------- DIYP
+
+    private void loadDiypChannel(final Channel channel, final String baseUrl, final String key) {
+        if (!mPendingDiypKeys.add(key)) {
+            return;
+        }
+        submit(() -> {
+            try {
+                List<Program> programs = fetchDiypPrograms(channel, baseUrl);
+                if (programs.isEmpty()) {
+                    Log.d(TAG, "DIYP returned no programmes for " + channel.name);
+                    return;
+                }
+                mProgramsByChannel.put(key, Collections.unmodifiableList(programs));
+                Log.d(TAG, "✓ DIYP EPG: " + programs.size() + " programmes for " + channel.name);
+                // Rewriting the whole cache after every single channel would mean one full write
+                // per channel while the user browses the list.
+                long now = System.currentTimeMillis();
+                if (now - mLastCacheSaveAt > DIYP_CACHE_SAVE_INTERVAL_MS) {
+                    mLastCacheSaveAt = now;
+                    mCache.savePrograms(mProgramsByChannel);
+                }
+                notifyEpgUpdated();
+            } catch (Exception e) {
+                Log.w(TAG, "DIYP EPG failed for " + channel.name + ": " + e.getMessage());
+            } finally {
+                mPendingDiypKeys.remove(key);
+            }
+        });
+    }
+
+    private List<Program> fetchDiypPrograms(Channel channel, String baseUrl) throws IOException {
+        String name = diypChannelToken(channel);
+        String today = new SimpleDateFormat("yyyyMMdd", Locale.US).format(new Date());
+        // Channel names are Chinese far more often than not, so the substitution must be encoded.
+        String url = baseUrl
+                .replace("{name}", URLEncoder.encode(name, "UTF-8"))
+                .replace("{date}", today);
+
+        HttpURLConnection connection = openConnection(url);
+        InputStream stream = null;
         try {
-            if (timeStr == null || timeStr.isEmpty()) {
-                return 0;
-            }
+            stream = connection.getInputStream();
+            String json = readAsString(stream, MAX_DIYP_BYTES);
+            List<Program> programs = parseDiypPrograms(json);
+            Collections.sort(programs, PROGRAM_ORDER);
+            fixMissingEndTimes(programs);
+            return programs;
+        } finally {
+            closeQuietly(stream);
+            connection.disconnect();
+        }
+    }
 
-            // Format: "20260726004600 +0800"
-            String[] parts = timeStr.trim().split("\\s+");
-            if (parts.length < 1) {
-                return 0;
-            }
+    /**
+     * A DIYP endpoint looks up channels by name. Playlists routinely put a local stream number
+     * in tvg-id (the one this was tested against numbers its 151 channels 1..n), and asking for
+     * "ch=56" returns nothing, so a tvg-id is only preferred when it reads like a name.
+     */
+    private static String diypChannelToken(Channel channel) {
+        String tvgId = channel.tvgId;
+        if (tvgId != null && !tvgId.isEmpty() && !isAllDigits(tvgId)) {
+            return tvgId;
+        }
+        return channel.name;
+    }
 
-            String dateTimeStr = parts[0];
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMddHHmmss", Locale.US);
-            Date date = sdf.parse(dateTimeStr);
-            return date.getTime();
-        } catch (Exception e) {
-            Log.d(TAG, "Error parsing XMLTV time: " + timeStr);
+    private static boolean isAllDigits(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            if (!Character.isDigit(value.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * DIYP items carry clock times ("start":"20:00") plus the day they belong to. The old
+     * parser stored 0 for every start and stop, which made "now playing" guesswork.
+     */
+    private List<Program> parseDiypPrograms(String json) {
+        List<Program> programs = new ArrayList<>();
+        JsonElement root = JsonParser.parseString(json);
+        JsonArray items;
+        long dayStart;
+
+        if (root.isJsonObject()) {
+            JsonObject object = root.getAsJsonObject();
+            dayStart = startOfDay(optString(object, "date"));
+            JsonElement data = object.get("epg_data");
+            if (data == null || !data.isJsonArray()) {
+                return programs;
+            }
+            items = data.getAsJsonArray();
+        } else if (root.isJsonArray()) {
+            dayStart = startOfDay(null);
+            items = root.getAsJsonArray();
+        } else {
+            return programs;
+        }
+
+        for (int i = 0; i < items.size(); i++) {
+            if (!items.get(i).isJsonObject()) {
+                continue;
+            }
+            JsonObject item = items.get(i).getAsJsonObject();
+            String title = firstNonEmpty(item, "节目名", "title", "name", "programName");
+            if (title == null) {
+                continue;
+            }
+            long start = parseDiypTime(firstNonEmpty(item, "start", "开始时间", "st"), dayStart);
+            long end = parseDiypTime(firstNonEmpty(item, "end", "结束时间", "et"), dayStart);
+            if (start <= 0) {
+                continue;
+            }
+            if (end > 0 && end <= start) {
+                end += 24 * 60 * 60 * 1000L; // programme runs past midnight
+            }
+            programs.add(new Program(title, start, end));
+        }
+        return programs;
+    }
+
+    /** Accepts "HH:mm", "HH:mm:ss" and "yyyy-MM-dd HH:mm" style values. */
+    private static long parseDiypTime(String value, long dayStart) {
+        if (value == null) {
             return 0;
         }
+        String text = value.trim();
+        if (text.isEmpty()) {
+            return 0;
+        }
+        int space = text.indexOf(' ');
+        if (text.indexOf('-') > 0 && space > 0) {
+            long day = startOfDay(text.substring(0, space));
+            return day <= 0 ? 0 : day + millisOfDay(text.substring(space + 1));
+        }
+        long offset = millisOfDay(text);
+        return offset < 0 ? 0 : dayStart + offset;
     }
 
-    private String fetchUrl(String urlString) {
+    private static long millisOfDay(String clock) {
+        String[] parts = clock.trim().split(":");
+        if (parts.length < 2) {
+            return -1;
+        }
         try {
-            URL url = new URL(urlString);
-            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(5000);
-            connection.setReadTimeout(5000);
+            int hour = Integer.parseInt(parts[0].trim());
+            int minute = Integer.parseInt(parts[1].trim());
+            int second = parts.length > 2 ? Integer.parseInt(parts[2].trim()) : 0;
+            return (hour * 3600L + minute * 60L + second) * 1000L;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
 
-            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
-                BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(connection.getInputStream()));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    sb.append(line).append("\n");
-                }
-                reader.close();
-                return sb.toString();
+    /** Midnight, device timezone, of the given "yyyy-MM-dd" / "yyyyMMdd" date (today if null). */
+    private static long startOfDay(String date) {
+        Calendar calendar = Calendar.getInstance();
+        String digits = date == null ? "" : date.replace("-", "").replace("/", "").trim();
+        if (digits.length() >= 8) {
+            try {
+                calendar.set(Calendar.YEAR, Integer.parseInt(digits.substring(0, 4)));
+                calendar.set(Calendar.MONTH, Integer.parseInt(digits.substring(4, 6)) - 1);
+                calendar.set(Calendar.DAY_OF_MONTH, Integer.parseInt(digits.substring(6, 8)));
+            } catch (NumberFormatException e) {
+                Log.d(TAG, "Unparsable EPG date: " + date);
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Error fetching URL: " + urlString, e);
+        }
+        calendar.set(Calendar.HOUR_OF_DAY, 0);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        return calendar.getTimeInMillis();
+    }
+
+    private static String optString(JsonObject object, String field) {
+        JsonElement element = object.get(field);
+        return element != null && element.isJsonPrimitive() ? element.getAsString() : null;
+    }
+
+    private static String firstNonEmpty(JsonObject object, String... fields) {
+        for (String field : fields) {
+            String value = optString(object, field);
+            if (value != null && !value.trim().isEmpty()) {
+                return value.trim();
+            }
         }
         return null;
+    }
+
+    // ---------------------------------------------------------- time and order
+
+    private static final Comparator<Program> PROGRAM_ORDER =
+            (first, second) -> first.startTime < second.startTime
+                    ? -1 : (first.startTime == second.startTime ? 0 : 1);
+
+    private static void finalizePrograms(Map<String, List<Program>> programsByChannel) {
+        for (Map.Entry<String, List<Program>> entry : programsByChannel.entrySet()) {
+            List<Program> programs = entry.getValue();
+            Collections.sort(programs, PROGRAM_ORDER);
+            fixMissingEndTimes(programs);
+            entry.setValue(Collections.unmodifiableList(programs));
+        }
+    }
+
+    /** Feeds sometimes omit or mangle the stop time; run such an item up to the next one. */
+    private static void fixMissingEndTimes(List<Program> programs) {
+        for (int i = 0; i < programs.size(); i++) {
+            Program program = programs.get(i);
+            if (program.endTime > program.startTime) {
+                continue;
+            }
+            program.endTime = i + 1 < programs.size()
+                    ? programs.get(i + 1).startTime
+                    : program.startTime + DEFAULT_PROGRAM_DURATION_MS;
+        }
+    }
+
+    /**
+     * Parses an XMLTV timestamp such as {@code 20260726004600 +0800}. The offset is part of
+     * the value and must be honoured: ignoring it (as the previous implementation did) shifted
+     * every programme by the difference between the feed's timezone and the device's.
+     */
+    static long parseXmltvTime(String value) {
+        if (value == null) {
+            return 0;
+        }
+        String text = value.trim();
+        int digits = 0;
+        while (digits < text.length() && Character.isDigit(text.charAt(digits))) {
+            digits++;
+        }
+        if (digits < 8) {
+            return 0;
+        }
+        int year = number(text, 0, 4);
+        int month = number(text, 4, 6);
+        int day = number(text, 6, 8);
+        if (month < 1 || month > 12 || day < 1 || day > 31) {
+            return 0;
+        }
+        long secondsOfDay = (digits >= 10 ? number(text, 8, 10) : 0) * 3600L
+                + (digits >= 12 ? number(text, 10, 12) : 0) * 60L
+                + (digits >= 14 ? number(text, 12, 14) : 0);
+        long utcSeconds = daysFromEpoch(year, month, day) * 86400L + secondsOfDay;
+
+        Integer offsetSeconds = parseUtcOffset(text.substring(digits).trim());
+        if (offsetSeconds != null) {
+            return (utcSeconds - offsetSeconds) * 1000L;
+        }
+        // No offset given: XMLTV says the value is local time, so the device's zone is the
+        // best available guess.
+        long asIfUtc = utcSeconds * 1000L;
+        return asIfUtc - TimeZone.getDefault().getOffset(asIfUtc);
+    }
+
+    /** Returns null when no offset is present, so callers can fall back to local time. */
+    private static Integer parseUtcOffset(String text) {
+        if (text.isEmpty()) {
+            return null;
+        }
+        if (text.equalsIgnoreCase("Z") || text.equalsIgnoreCase("UTC") || text.equalsIgnoreCase("GMT")) {
+            return 0;
+        }
+        char sign = text.charAt(0);
+        if (sign != '+' && sign != '-') {
+            return null;
+        }
+        String digits = text.substring(1).replace(":", "");
+        if (digits.length() < 2) {
+            return null;
+        }
+        try {
+            int hours = Integer.parseInt(digits.substring(0, 2));
+            int minutes = digits.length() >= 4 ? Integer.parseInt(digits.substring(2, 4)) : 0;
+            int offset = hours * 3600 + minutes * 60;
+            return sign == '-' ? -offset : offset;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static int number(String text, int from, int to) {
+        int value = 0;
+        for (int i = from; i < to; i++) {
+            value = value * 10 + (text.charAt(i) - '0');
+        }
+        return value;
+    }
+
+    /** Days between 1970-01-01 and the given civil date (proleptic Gregorian). */
+    private static long daysFromEpoch(int year, int month, int day) {
+        long y = year - (month <= 2 ? 1 : 0);
+        long era = (y >= 0 ? y : y - 399) / 400;
+        long yearOfEra = y - era * 400;
+        long dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+        long dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+        return era * 146097 + dayOfEra - 719468;
+    }
+
+    // --------------------------------------------------------------- transport
+
+    private EpgSourceType detectEpgSourceType(String url) {
+        String lower = url.toLowerCase(Locale.US);
+        int query = lower.indexOf('?');
+        String path = query < 0 ? lower : lower.substring(0, query);
+        if (path.endsWith(".zip")) {
+            return EpgSourceType.ZIP;
+        }
+        // A DIYP endpoint has to be templated per channel; without a placeholder the same URL
+        // would be fetched once per channel, so treat anything else as XMLTV.
+        if (url.contains("{name}") || lower.contains("diyp")) {
+            return EpgSourceType.DIYP;
+        }
+        return EpgSourceType.XMLTV;
+    }
+
+    private HttpURLConnection openConnection(String urlString) throws IOException {
+        String current = urlString;
+        for (int redirect = 0; redirect <= MAX_REDIRECTS; redirect++) {
+            URL url = new URL(current);
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
+            connection.setReadTimeout(READ_TIMEOUT_MS);
+            connection.setInstanceFollowRedirects(false);
+            int code = connection.getResponseCode();
+            if (code >= 300 && code < 400) {
+                String location = connection.getHeaderField("Location");
+                connection.disconnect();
+                if (location == null || location.isEmpty()) {
+                    throw new IOException("Redirect without a location from " + current);
+                }
+                current = new URL(url, location).toString();
+                continue;
+            }
+            if (code != HttpURLConnection.HTTP_OK) {
+                String message = "HTTP " + code + " " + connection.getResponseMessage();
+                connection.disconnect();
+                throw new IOException(message + " from " + current);
+            }
+            return connection;
+        }
+        throw new IOException("Too many redirects for " + urlString);
+    }
+
+    /** Transparently handles feeds whose body is gzipped (the usual {@code .xml.gz}). */
+    private static InputStream maybeGunzip(InputStream stream) throws IOException {
+        PushbackInputStream pushback = new PushbackInputStream(stream, 2);
+        int first = pushback.read();
+        int second = pushback.read();
+        if (second != -1) {
+            pushback.unread(second);
+        }
+        if (first != -1) {
+            pushback.unread(first);
+        }
+        if (first == 0x1f && second == 0x8b) {
+            return new GZIPInputStream(pushback, STREAM_BUFFER_BYTES);
+        }
+        return pushback;
+    }
+
+    /** Positions the stream on the first XML entry of a ZIP packaged EPG. */
+    private static InputStream openXmlFromZip(InputStream stream) throws IOException {
+        ZipInputStream zip = new ZipInputStream(stream);
+        ZipEntry entry;
+        while ((entry = zip.getNextEntry()) != null) {
+            String name = entry.getName().toLowerCase(Locale.US);
+            if (!entry.isDirectory() && (name.endsWith(".xml") || name.endsWith(".xmltv"))) {
+                Log.d(TAG, "Reading EPG from ZIP entry " + entry.getName());
+                return zip;
+            }
+        }
+        throw new IOException("ZIP contains no XMLTV document");
+    }
+
+    private static String readAsString(InputStream stream, int maxBytes) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8 * 1024];
+        int read;
+        while ((read = stream.read(chunk)) != -1) {
+            if (buffer.size() + read > maxBytes) {
+                throw new IOException("Response exceeds " + maxBytes + " bytes");
+            }
+            buffer.write(chunk, 0, read);
+        }
+        return new String(buffer.toByteArray(), "UTF-8");
+    }
+
+    // ----------------------------------------------------------------- plumbing
+
+    private void submit(Runnable task) {
+        try {
+            mExecutor.execute(task);
+        } catch (RejectedExecutionException e) {
+            Log.d(TAG, "EPG task rejected: the manager is shut down");
+        }
+    }
+
+    private void notifyEpgUpdated() {
+        final OnEpgUpdatedListener listener = mListener;
+        if (listener == null) {
+            return;
+        }
+        mMainHandler.post(() -> {
+            OnEpgUpdatedListener current = mListener;
+            if (current != null) {
+                current.onEpgUpdated();
+            }
+        });
+    }
+
+    private static void closeQuietly(Closeable closeable) {
+        if (closeable == null) {
+            return;
+        }
+        try {
+            closeable.close();
+        } catch (IOException ignored) {
+            // nothing useful to do
+        }
     }
 }
