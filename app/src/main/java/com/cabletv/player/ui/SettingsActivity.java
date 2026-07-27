@@ -55,7 +55,8 @@ public class SettingsActivity extends Activity {
         if (mEpgDisplayToggle != null) {
             mEpgDisplayToggle.setOnCheckedChangeListener((btn, isChecked) -> {
                 AppConfig.setEpgDisplayEnabled(isChecked);
-                Toast.makeText(this, isChecked ? "EPG display enabled" : "EPG display disabled", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, isChecked ? R.string.epg_display_enabled : R.string.epg_display_disabled,
+                        Toast.LENGTH_SHORT).show();
             });
         }
     }
@@ -78,23 +79,23 @@ public class SettingsActivity extends Activity {
     private void saveM3uUrl() {
         String url = mM3uUrlInput.getText().toString().trim();
         AppConfig.setM3uUrl(url);
-        Toast.makeText(this, "M3U URL saved", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, R.string.m3u_url_saved, Toast.LENGTH_SHORT).show();
     }
 
     private void saveEpgUrl() {
         String url = mEpgUrlInput.getText().toString().trim();
         AppConfig.setEpgUrl(url);
-        Toast.makeText(this, "EPG URL saved", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, R.string.epg_url_saved, Toast.LENGTH_SHORT).show();
     }
 
     private void handleWebServerToggle(boolean enabled) {
         AppConfig.setWebServerEnabled(enabled);
         if (enabled) {
             ConfigWebServer.startServer(this);
-            Toast.makeText(this, "Web server started", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.web_server_started, Toast.LENGTH_SHORT).show();
         } else {
             ConfigWebServer.stopServer();
-            Toast.makeText(this, "Web server stopped", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.web_server_stopped, Toast.LENGTH_SHORT).show();
         }
         updateWebServerAddress();
     }
@@ -104,7 +105,7 @@ public class SettingsActivity extends Activity {
             String ip = getLocalIpAddress();
             int port = AppConfig.getWebServerPort();
             String address = "http://" + ip + ":" + port;
-            mWebServerAddress.setText("Address: " + address);
+            mWebServerAddress.setText(getString(R.string.server_address_format, address));
         } else {
             mWebServerAddress.setText("");
         }

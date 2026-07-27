@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     private ChannelListComponent mChannelListComponent;
     private PlaybackInfoComponent mPlaybackInfoComponent;
     private PlaybackStatusView mPlaybackStatusView;
+    private ChannelNumberView mChannelNumberView;
     private ChannelRepository.OnChannelsChangedListener mChannelsChangedListener;
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
@@ -41,7 +42,15 @@ public class MainActivity extends Activity {
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mReconnectRunnable = this::reconnectCurrentChannel;
     private int mReconnectAttempt = 0;
+    /** Which of the current channel's URLs is playing; the rest are fallbacks. */
+    private int mCurrentUrlIndex = 0;
     private boolean mDestroyed = false;
+
+    /** How long the digits typed on the remote stay on screen before they tune a channel. */
+    private static final long NUMBER_INPUT_TIMEOUT_MS = 2_000;
+    private static final int MAX_CHANNEL_DIGITS = 4;
+    private final StringBuilder mNumberInput = new StringBuilder();
+    private final Runnable mNumberCommitRunnable = this::commitNumberInput;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,6 +92,10 @@ public class MainActivity extends Activity {
         // Centred status message for buffering / reconnect / playback failure
         mPlaybackStatusView = new PlaybackStatusView(this);
         rootView.addView(mPlaybackStatusView, mPlaybackStatusView.createCenteredLayoutParams());
+
+        // Digits typed on the remote, shown while the user is still typing
+        mChannelNumberView = new ChannelNumberView(this);
+        rootView.addView(mChannelNumberView, mChannelNumberView.createTopEndLayoutParams());
 
         // Surface playback failures and reconnect automatically instead of showing a black screen
         mVideoView.addOnStateChangeListener(new VideoView.SimpleOnStateChangeListener() {
@@ -150,29 +163,30 @@ public class MainActivity extends Activity {
         // Set up audio manager for volume control
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
-        // Start web server for remote configuration
+        // Register for remote configuration changes unconditionally: the user can switch the web
+        // server on from Settings later, and without a listener those edits would only take
+        // effect on the next launch.
+        ConfigWebServer.setConfigChangeListener(new ConfigWebServer.OnConfigChangeListener() {
+            @Override
+            public void onM3uUrlChanged(String newUrl) {
+                Log.d(TAG, "M3U URL changed, reloading channels: " + newUrl);
+                mChannelRepository.reload();
+            }
+
+            @Override
+            public void onEpgUrlChanged(String newUrl) {
+                Log.d(TAG, "EPG URL changed, reloading EPG: " + newUrl);
+                mEpgManager.onEpgSourceChanged();
+                // Per-channel sources load lazily, so ask for the channel on screen right
+                // away instead of leaving its info bar empty until the user navigates.
+                Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
+                if (current != null) {
+                    mEpgManager.loadEpg(current);
+                }
+            }
+        });
         if (AppConfig.isWebServerEnabled()) {
             ConfigWebServer.startServer(this);
-            // Set up callback for configuration changes
-            ConfigWebServer.setConfigChangeListener(new ConfigWebServer.OnConfigChangeListener() {
-                @Override
-                public void onM3uUrlChanged(String newUrl) {
-                    Log.d(TAG, "M3U URL changed, reloading channels: " + newUrl);
-                    mChannelRepository.reload();
-                }
-
-                @Override
-                public void onEpgUrlChanged(String newUrl) {
-                    Log.d(TAG, "EPG URL changed, reloading EPG: " + newUrl);
-                    mEpgManager.onEpgSourceChanged();
-                    // Per-channel sources load lazily, so ask for the channel on screen right
-                    // away instead of leaving its info bar empty until the user navigates.
-                    Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
-                    if (current != null) {
-                        mEpgManager.loadEpg(current);
-                    }
-                }
-            });
         }
     }
 
@@ -219,7 +233,73 @@ public class MainActivity extends Activity {
                 handleBack();
                 return true;
             default:
+                int digit = digitFor(action);
+                if (digit >= 0) {
+                    handleNumberKey(digit);
+                    return true;
+                }
                 return super.dispatchKeyEvent(event);
+        }
+    }
+
+    /** @return 0-9 for the number actions, or -1 for anything else. */
+    private static int digitFor(KeyMapping.Action action) {
+        int offset = action.ordinal() - KeyMapping.Action.NUM_0.ordinal();
+        return offset >= 0 && offset <= 9 ? offset : -1;
+    }
+
+    /**
+     * Collects the digits typed on the remote and tunes to that channel number once the user
+     * stops typing, the way a TV does. Numbers are positions in the channel list, counted from 1.
+     */
+    private void handleNumberKey(int digit) {
+        if (mNumberInput.length() >= MAX_CHANNEL_DIGITS) {
+            mNumberInput.setLength(0);
+        }
+        mNumberInput.append(digit);
+        Channel target = channelForNumber(numberOf(mNumberInput));
+        mChannelNumberView.showDigits(mNumberInput.toString(), target != null ? target.name : null);
+        mMainHandler.removeCallbacks(mNumberCommitRunnable);
+        mMainHandler.postDelayed(mNumberCommitRunnable, NUMBER_INPUT_TIMEOUT_MS);
+    }
+
+    private void commitNumberInput() {
+        int number = numberOf(mNumberInput);
+        cancelNumberInput();
+        Channel target = channelForNumber(number);
+        if (target == null) {
+            Log.d(TAG, "No channel at number " + number);
+            return;
+        }
+        if (mChannelListVisible) {
+            hideChannelList();
+            mChannelListVisible = false;
+        }
+        mCurrentChannelIndex = number - 1;
+        playChannel(mCurrentChannelIndex);
+    }
+
+    private void cancelNumberInput() {
+        mNumberInput.setLength(0);
+        mMainHandler.removeCallbacks(mNumberCommitRunnable);
+        if (mChannelNumberView != null) {
+            mChannelNumberView.hide();
+        }
+    }
+
+    private boolean isNumberInputActive() {
+        return mNumberInput.length() > 0;
+    }
+
+    private Channel channelForNumber(int number) {
+        return number >= 1 ? mChannelRepository.getChannel(number - 1) : null;
+    }
+
+    private static int numberOf(CharSequence digits) {
+        try {
+            return Integer.parseInt(digits.toString());
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
@@ -392,7 +472,10 @@ public class MainActivity extends Activity {
     }
 
     private void handleBack() {
-        if (mChannelListVisible) {
+        if (isNumberInputActive()) {
+            // BACK abandons a half-typed channel number instead of leaving the app.
+            cancelNumberInput();
+        } else if (mChannelListVisible) {
             hideChannelList();
             mChannelListVisible = false;
         } else {
@@ -407,10 +490,14 @@ public class MainActivity extends Activity {
         Channel channel = mChannelRepository.getChannel(index);
         Log.d(TAG, "Got channel from repository: " + (channel != null ? channel.name : "null"));
         if (channel != null) {
-            Log.d(TAG, "Playing channel: " + channel.name + " - " + channel.url);
+            // A new channel always starts from its first source
+            mCurrentUrlIndex = 0;
+            final String url = channel.url();
+            Log.d(TAG, "Playing channel: " + channel.name + " - " + url
+                    + " (" + channel.urlCount() + " source(s))");
             // Ensure UI operations happen on main thread
             runOnUiThread(() -> {
-                mVideoView.switchUrl(channel.url, channel.headers);
+                mVideoView.switchUrl(url, channel.headers);
                 mVideoView.start();
                 if (mChannelListComponent != null) {
                     mChannelListComponent.setCurrentChannel(index);
@@ -421,7 +508,7 @@ public class MainActivity extends Activity {
                 }
             });
             // Save current channel for resume on next app startup
-            AppConfig.setLastChannelUrl(channel.url);
+            AppConfig.setLastChannelUrl(url);
             Log.d(TAG, "About to call mEpgManager.loadEpg for channel: " + channel.name);
             mEpgManager.loadEpg(channel);
         } else {
@@ -447,11 +534,38 @@ public class MainActivity extends Activity {
             case VideoView.STATE_ERROR:
             case VideoView.STATE_PLAYBACK_COMPLETED:
                 // Live streams should never complete; when they do, the source dropped us.
-                scheduleReconnect();
+                // A dead source is worth replacing before waiting: try the channel's other
+                // URLs first, and only back off once none of them work.
+                if (!tryNextUrl()) {
+                    scheduleReconnect();
+                }
                 break;
             default:
                 break;
         }
+    }
+
+    /**
+     * Moves to the next URL the playlist lists for this channel.
+     *
+     * @return true when another source was started, false when they have all been tried
+     */
+    private boolean tryNextUrl() {
+        if (mDestroyed) {
+            return false;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null || mCurrentUrlIndex + 1 >= channel.urlCount()) {
+            return false;
+        }
+        mCurrentUrlIndex++;
+        String url = channel.urlAt(mCurrentUrlIndex);
+        Log.w(TAG, "Source " + (mCurrentUrlIndex + 1) + "/" + channel.urlCount()
+                + " for " + channel.name + ": " + url);
+        mPlaybackStatusView.showMessage(getString(R.string.playback_trying_backup,
+                channel.name, mCurrentUrlIndex + 1, channel.urlCount()));
+        restartPlayer(channel, url);
+        return true;
     }
 
     private void scheduleReconnect() {
@@ -486,9 +600,19 @@ public class MainActivity extends Activity {
             return;
         }
         Log.i(TAG, "Reconnect attempt " + mReconnectAttempt + " for " + channel.name);
-        // Rebuild the player: after an error the existing instance cannot be reused
+        // Start the whole list over: the source that failed a moment ago may well be back, and
+        // the ones after it get another turn through tryNextUrl().
+        mCurrentUrlIndex = 0;
+        restartPlayer(channel, channel.url());
+    }
+
+    /** Rebuilds the player: after an error the existing instance cannot be reused. */
+    private void restartPlayer(Channel channel, String url) {
+        if (url == null) {
+            return;
+        }
         mVideoView.release();
-        mVideoView.setUrl(channel.url, channel.headers);
+        mVideoView.setUrl(url, channel.headers);
         mVideoView.start();
     }
 
@@ -520,6 +644,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         mDestroyed = true;
         mMainHandler.removeCallbacks(mReconnectRunnable);
+        mMainHandler.removeCallbacks(mNumberCommitRunnable);
         // The web server keeps its listener in a static field; leaving ours there would leak
         // this Activity for the whole process lifetime.
         ConfigWebServer.setConfigChangeListener(null);

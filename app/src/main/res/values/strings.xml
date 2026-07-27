@@ -27,4 +27,16 @@
     <string name="playback_failed">Cannot play %1$s. Press OK to choose another channel.</string>
     <string name="playlist_load_failed">Cannot load the playlist: %1$s</string>
     <string name="playlist_load_failed_cached">Cannot refresh the playlist (%1$s). Showing the last saved copy.</string>
+    <string name="playback_trying_backup">%1$s is not responding, trying source %2$d of %3$d…</string>
+    <string name="todays_programs">Today\'s Programs</string>
+    <string name="no_epg_data">No EPG data</string>
+    <string name="next_program">Next: %1$s</string>
+    <string name="channel_number_unknown">No such channel</string>
+    <string name="m3u_url_saved">M3U URL saved</string>
+    <string name="epg_url_saved">EPG URL saved</string>
+    <string name="web_server_started">Web server started</string>
+    <string name="web_server_stopped">Web server stopped</string>
+    <string name="epg_display_enabled">EPG display enabled</string>
+    <string name="epg_display_disabled">EPG display disabled</string>
+    <string name="server_address_format">Address: %1$s</string>
 </resources>

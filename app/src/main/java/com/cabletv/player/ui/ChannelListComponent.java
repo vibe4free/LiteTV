@@ -12,6 +12,7 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.LinearSmoothScroller;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.cabletv.player.R;
@@ -47,6 +48,11 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
     public enum FocusPanel { CHANNELS, PROGRAMS }
     private FocusPanel mFocusPanel = FocusPanel.CHANNELS;
+
+    static final int CHANNEL_ROW_HEIGHT_DP = 60;
+    static final int PROGRAM_ROW_HEIGHT_DP = 40;
+    /** Cap per-row animation time: holding the D-pad down must not queue up a long scroll. */
+    private static final int MAX_SCROLL_MS_PER_INCH = 40;
 
     public interface OnChannelSelectedListener {
         void onChannelSelected(int index, Channel channel);
@@ -86,7 +92,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         channelSection.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
 
         TextView titleView = new TextView(context);
-        titleView.setText("Channels");
+        titleView.setText(R.string.channel_list);
         titleView.setTextColor(0xFFFFFFFF);
         titleView.setTextSize(16);
         titleView.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(12));
@@ -95,7 +101,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
         mRecyclerView = new RecyclerView(context);
         mRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
-        mRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+        mRecyclerView.setLayoutManager(new CenteringLayoutManager(context));
         mRecyclerView.setBackgroundColor(0x00000000);
         mRecyclerView.setFocusable(false);
         channelSection.addView(mRecyclerView);
@@ -110,7 +116,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mProgramListContainer.setVisibility(GONE);
 
         TextView programTitle = new TextView(context);
-        programTitle.setText("Today's Programs");
+        programTitle.setText(R.string.todays_programs);
         programTitle.setTextColor(0xFFFFFFFF);
         programTitle.setTextSize(14);
         programTitle.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(8));
@@ -119,7 +125,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
 
         mProgramRecyclerView = new RecyclerView(context);
         mProgramRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
-        mProgramRecyclerView.setLayoutManager(new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, false));
+        mProgramRecyclerView.setLayoutManager(new CenteringLayoutManager(context));
         mProgramRecyclerView.setBackgroundColor(0x00000000);
         mProgramRecyclerView.setFocusable(false);
         mProgramListContainer.addView(mProgramRecyclerView);
@@ -132,7 +138,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mEpgManager = epgManager;
         mAdapter.setEpgManager(epgManager);
         if (mEpgManager != null) {
-            mEpgManager.setOnEpgUpdatedListener(() -> {
+            mEpgManager.addOnEpgUpdatedListener(() -> {
                 Log.d(TAG, "EPG updated, refreshing adapter and program list");
                 if (mAdapter != null) {
                     mAdapter.notifyDataSetChanged();
@@ -151,13 +157,13 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mCurrentChannelIndex = currentIndex;
         mSelectedChannelIndex = currentIndex;
         mAdapter.updateData(mChannels, currentIndex, currentIndex);
-        mRecyclerView.scrollToPosition(currentIndex);
+        scrollToCentered(mRecyclerView, currentIndex, CHANNEL_ROW_HEIGHT_DP);
     }
 
     public void setCurrentChannel(int index) {
         mCurrentChannelIndex = index;
         mAdapter.setCurrentChannel(index);
-        mRecyclerView.scrollToPosition(index);
+        scrollToCentered(mRecyclerView, index, CHANNEL_ROW_HEIGHT_DP);
     }
 
     private void refreshProgramListForCurrentSelection() {
@@ -185,7 +191,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             mSelectedProgramIndex = currentProgramIndex;
             programAdapter.setSelectedIndex(currentProgramIndex);
             programAdapter.setFocused(mFocusPanel == FocusPanel.PROGRAMS);
-            mProgramRecyclerView.scrollToPosition(currentProgramIndex);
+            scrollToCentered(mProgramRecyclerView, currentProgramIndex, PROGRAM_ROW_HEIGHT_DP);
         } else {
             mProgramListContainer.setVisibility(GONE);
             mProgramListVisible = false;
@@ -197,7 +203,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         int oldIndex = mSelectedChannelIndex;
         mSelectedChannelIndex = index;
         mAdapter.setSelectedChannel(oldIndex, index);
-        mRecyclerView.scrollToPosition(index);
+        scrollToCentered(mRecyclerView, index, CHANNEL_ROW_HEIGHT_DP);
 
         // Reset focus to channels panel when selecting a channel
         mFocusPanel = FocusPanel.CHANNELS;
@@ -252,7 +258,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         if (newIndex == mSelectedProgramIndex) return;
         mSelectedProgramIndex = newIndex;
         ((ProgramListAdapter) adapter).setSelectedIndex(newIndex);
-        mProgramRecyclerView.scrollToPosition(newIndex);
+        scrollToCentered(mProgramRecyclerView, newIndex, PROGRAM_ROW_HEIGHT_DP);
     }
 
     @Override
@@ -309,8 +315,65 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     public void onLockStateChanged(boolean isLocked) {
     }
 
+    /**
+     * Puts the highlighted row in the middle of its panel rather than letting it sit at the very
+     * edge. A neighbouring row animates; a jump of a whole screen or more lands instantly,
+     * because animating it would only make the user wait.
+     */
+    private void scrollToCentered(RecyclerView list, int position, int rowHeightDp) {
+        RecyclerView.LayoutManager manager = list.getLayoutManager();
+        if (position < 0 || !(manager instanceof LinearLayoutManager)) {
+            return;
+        }
+        final LinearLayoutManager layoutManager = (LinearLayoutManager) manager;
+        if (list.getHeight() == 0) {
+            // Not laid out yet: centre once it is, otherwise the offset would be meaningless.
+            list.post(() -> scrollToCentered(list, position, rowHeightDp));
+            return;
+        }
+        int first = layoutManager.findFirstVisibleItemPosition();
+        int last = layoutManager.findLastVisibleItemPosition();
+        boolean nearby = first != RecyclerView.NO_POSITION
+                && position >= first - 1 && position <= last + 1;
+        if (nearby) {
+            list.smoothScrollToPosition(position);
+        } else {
+            layoutManager.scrollToPositionWithOffset(
+                    position, Math.max(0, (list.getHeight() - dp2px(rowHeightDp)) / 2));
+        }
+    }
+
     private int dp2px(int dp) {
         return Math.round(getContext().getResources().getDisplayMetrics().density * dp);
+    }
+
+    /** A LinearLayoutManager whose smooth scrolls centre the target instead of just revealing it. */
+    private static class CenteringLayoutManager extends LinearLayoutManager {
+        CenteringLayoutManager(Context context) {
+            super(context, LinearLayoutManager.VERTICAL, false);
+        }
+
+        @Override
+        public void smoothScrollToPosition(RecyclerView recyclerView, RecyclerView.State state,
+                                           int position) {
+            LinearSmoothScroller scroller = new LinearSmoothScroller(recyclerView.getContext()) {
+                @Override
+                public int calculateDtToFit(int viewStart, int viewEnd, int boxStart, int boxEnd,
+                                            int snapPreference) {
+                    return (boxStart + (boxEnd - boxStart) / 2)
+                            - (viewStart + (viewEnd - viewStart) / 2);
+                }
+
+                @Override
+                protected float calculateSpeedPerPixel(android.util.DisplayMetrics metrics) {
+                    // Float division on purpose: integer division here rounds to zero, which
+                    // gives the scroller a zero duration and it silently never moves.
+                    return (float) MAX_SCROLL_MS_PER_INCH / metrics.densityDpi;
+                }
+            };
+            scroller.setTargetPosition(position);
+            startSmoothScroll(scroller);
+        }
     }
 
     // Adapter for channel list
@@ -364,7 +427,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             view.setOrientation(LinearLayout.VERTICAL);
             view.setLayoutParams(new RecyclerView.LayoutParams(
                     RecyclerView.LayoutParams.MATCH_PARENT,
-                    dp2px(60)));
+                    dp2px(CHANNEL_ROW_HEIGHT_DP)));
             view.setPadding(dp2px(12), dp2px(8), dp2px(12), dp2px(8));
             return new ChannelViewHolder(view, mContext);
         }
@@ -545,7 +608,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             view.setOrientation(LinearLayout.HORIZONTAL);
             view.setLayoutParams(new RecyclerView.LayoutParams(
                     RecyclerView.LayoutParams.MATCH_PARENT,
-                    dp2px(40)));
+                    dp2px(PROGRAM_ROW_HEIGHT_DP)));
             view.setPadding(dp2px(12), dp2px(6), dp2px(12), dp2px(6));
             return new ProgramViewHolder(view, mContext);
         }

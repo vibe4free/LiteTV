@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -82,7 +83,11 @@ public class EpgManager {
     /** Channel keys with a DIYP request in flight; XMLTV needs no such set (one load covers all). */
     private final Set<String> mPendingDiypKeys = Collections.synchronizedSet(new HashSet<String>());
 
-    private volatile OnEpgUpdatedListener mListener;
+    /**
+     * More than one view shows programme text (the channel list and the info bar), so this is a
+     * list: a single slot would silently leave whoever registered first out of date.
+     */
+    private final List<OnEpgUpdatedListener> mListeners = new CopyOnWriteArrayList<>();
     private volatile List<Channel> mKnownChannels = Collections.emptyList();
     private volatile boolean mBulkLoadDone = false;
     private volatile boolean mBulkLoadQueued = false;
@@ -116,8 +121,14 @@ public class EpgManager {
         mCache = new EpgCache(context.getApplicationContext());
     }
 
-    public void setOnEpgUpdatedListener(OnEpgUpdatedListener listener) {
-        mListener = listener;
+    public void addOnEpgUpdatedListener(OnEpgUpdatedListener listener) {
+        if (listener != null && !mListeners.contains(listener)) {
+            mListeners.add(listener);
+        }
+    }
+
+    public void removeOnEpgUpdatedListener(OnEpgUpdatedListener listener) {
+        mListeners.remove(listener);
     }
 
     /**
@@ -204,7 +215,7 @@ public class EpgManager {
 
     /** Stops all pending EPG work. Call from the owning Activity's onDestroy(). */
     public void shutdown() {
-        mListener = null;
+        mListeners.clear();
         mExecutor.shutdownNow();
     }
 
@@ -1034,14 +1045,12 @@ public class EpgManager {
     }
 
     private void notifyEpgUpdated() {
-        final OnEpgUpdatedListener listener = mListener;
-        if (listener == null) {
+        if (mListeners.isEmpty()) {
             return;
         }
         mMainHandler.post(() -> {
-            OnEpgUpdatedListener current = mListener;
-            if (current != null) {
-                current.onEpgUpdated();
+            for (OnEpgUpdatedListener listener : mListeners) {
+                listener.onEpgUpdated();
             }
         });
     }

@@ -102,6 +102,11 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
 
     public void setEpgManager(EpgManager epgManager) {
         mEpgManager = epgManager;
+        if (mEpgManager != null) {
+            // The bar is often on screen before the guide arrives; without this it would keep
+            // saying "no EPG data" for a channel whose programme is already known.
+            mEpgManager.addOnEpgUpdatedListener(this::updateProgramInfo);
+        }
     }
 
     public void showChannelInfo(Channel channel) {
@@ -116,7 +121,7 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
     private void updateProgramInfo() {
         if (mCurrentChannel == null || mEpgManager == null) {
             if (mCurrentProgramView != null) {
-                mCurrentProgramView.setText("No EPG data");
+                mCurrentProgramView.setText(R.string.no_epg_data);
             }
             if (mNextProgramView != null) {
                 mNextProgramView.setText("");
@@ -146,7 +151,7 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
                 }
             }
         } else if (mCurrentProgramView != null) {
-            mCurrentProgramView.setText("No EPG data");
+            mCurrentProgramView.setText(R.string.no_epg_data);
             if (mProgressBar != null) {
                 mProgressBar.setProgress(0);
             }
@@ -154,11 +159,16 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
 
         String nextProgram = mEpgManager.getNextProgramInfo(mCurrentChannel);
         if (mNextProgramView != null) {
-            mNextProgramView.setText(nextProgram != null ? "Next: " + nextProgram : "");
+            mNextProgramView.setText(nextProgram != null
+                    ? getContext().getString(R.string.next_program, nextProgram)
+                    : "");
         }
     }
 
     private void showWithAutoHide() {
+        // Re-read the guide every time the bar appears: the programme it showed when it was last
+        // dismissed may have ended long ago.
+        updateProgramInfo();
         setVisibility(VISIBLE);
         setAlpha(0.0f);
         animate()
@@ -214,10 +224,8 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
 
     @Override
     public void setProgress(int duration, int position) {
-        if (mProgressBar != null && duration > 0) {
-            mProgressBar.setMax(duration);
-            mProgressBar.setProgress(position);
-        }
+        // The bar tracks how far the current programme has run, not the player's position in the
+        // stream, which for live TV is an arbitrary point inside the HLS window.
     }
 
     @Override

@@ -338,7 +338,7 @@ public class ChannelRepository {
         }
         List<Channel> all = mFlatChannels;
         for (int i = 0; i < all.size(); i++) {
-            if (currentUrl.equals(all.get(i).url)) {
+            if (all.get(i).hasUrl(currentUrl)) {
                 return i;
             }
         }
