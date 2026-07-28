@@ -4,20 +4,23 @@ import android.content.Context;
 
 import com.orhanobut.hawk.Hawk;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class AppConfig {
     private static final String M3U_URL_KEY = "app_m3u_url";
     private static final String EPG_URL_KEY = "app_epg_url";
     private static final String WEB_SERVER_ENABLED_KEY = "app_web_server_enabled";
     private static final String WEB_SERVER_PORT_KEY = "app_web_server_port";
-    private static final String SIDEBAR_ALPHA_KEY = "app_sidebar_alpha";
+    private static final String SIDEBAR_OPACITY_KEY = "app_sidebar_opacity";
     private static final String M3U_FILE_PATH_KEY = "app_m3u_file_path";
     private static final String EPG_DISPLAY_KEY = "app_epg_display_enabled";
     private static final String EPG_CACHE_VALIDITY_HOURS_KEY = "app_epg_cache_hours";
     private static final String LAST_CHANNEL_URL_KEY = "app_last_channel_url";
+    private static final String FAVORITE_CHANNELS_KEY = "app_favorite_channels";
 
     private static final String DEFAULT_EPG_URL = "";
     private static final int DEFAULT_WEB_SERVER_PORT = 8899;
-    private static final float DEFAULT_SIDEBAR_ALPHA = 0.75f;
     private static final int DEFAULT_EPG_CACHE_HOURS = 24; // EPG 缓存 24 小时后刷新
 
     // M3U URL
@@ -55,13 +58,18 @@ public class AppConfig {
         Hawk.put(WEB_SERVER_PORT_KEY, port);
     }
 
-    // Sidebar transparency
-    public static float getSidebarAlpha() {
-        return Hawk.get(SIDEBAR_ALPHA_KEY, DEFAULT_SIDEBAR_ALPHA);
+    /** How solid the channel-list panels are painted: 0 translucent, 1 semi-opaque, 2 opaque. */
+    public static final int SIDEBAR_TRANSLUCENT = 0;
+    public static final int SIDEBAR_SEMI_OPAQUE = 1;
+    public static final int SIDEBAR_OPAQUE = 2;
+
+    public static int getSidebarOpacity() {
+        int level = Hawk.get(SIDEBAR_OPACITY_KEY, SIDEBAR_TRANSLUCENT);
+        return level >= SIDEBAR_TRANSLUCENT && level <= SIDEBAR_OPAQUE ? level : SIDEBAR_TRANSLUCENT;
     }
 
-    public static void setSidebarAlpha(float alpha) {
-        Hawk.put(SIDEBAR_ALPHA_KEY, alpha);
+    public static void setSidebarOpacity(int level) {
+        Hawk.put(SIDEBAR_OPACITY_KEY, level);
     }
 
     // M3U File path (for uploaded files)
@@ -99,5 +107,18 @@ public class AppConfig {
 
     public static void setLastChannelUrl(String url) {
         Hawk.put(LAST_CHANNEL_URL_KEY, url);
+    }
+
+    /**
+     * Names of the channels the user marked as favourites, oldest first. Names rather than URLs:
+     * a playlist may hand out a different URL for the same channel on every refresh.
+     */
+    public static List<String> getFavoriteChannels() {
+        List<String> names = Hawk.get(FAVORITE_CHANNELS_KEY, null);
+        return names != null ? names : new ArrayList<String>();
+    }
+
+    public static void setFavoriteChannels(List<String> names) {
+        Hawk.put(FAVORITE_CHANNELS_KEY, new ArrayList<>(names));
     }
 }

@@ -12,6 +12,7 @@ import android.widget.FrameLayout;
 
 import com.cabletv.player.R;
 import com.cabletv.player.config.AppConfig;
+import com.cabletv.player.config.ChannelNavigator;
 import com.cabletv.player.config.ChannelRepository;
 import com.cabletv.player.config.KeyMapping;
 import com.cabletv.player.model.Channel;
@@ -25,6 +26,7 @@ public class MainActivity extends Activity {
 
     private VideoView mVideoView;
     private ChannelRepository mChannelRepository;
+    private ChannelNavigator mNavigator;
     private EpgManager mEpgManager;
     private ChannelListComponent mChannelListComponent;
     private PlaybackInfoComponent mPlaybackInfoComponent;
@@ -52,6 +54,11 @@ public class MainActivity extends Activity {
     private final StringBuilder mNumberInput = new StringBuilder();
     private final Runnable mNumberCommitRunnable = this::commitNumberInput;
 
+    /** How long OK must be held to mean "favourite this channel" rather than "select". */
+    private static final long OK_LONG_PRESS_MS = 600;
+    private final Runnable mOkLongPressRunnable = this::onOkLongPress;
+    private boolean mOkLongPressFired = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -61,6 +68,7 @@ public class MainActivity extends Activity {
         // Configure VideoView to use ExoPlayer instead of default Android MediaPlayer
         mVideoView.setPlayerFactory(new ExoMediaPlayerFactory());
         mChannelRepository = new ChannelRepository(this);
+        mNavigator = new ChannelNavigator();
         mEpgManager = new EpgManager(this);
 
         // Create overlay components
@@ -119,10 +127,13 @@ public class MainActivity extends Activity {
                     mCurrentChannelIndex = 0;
                     Log.d(TAG, "Subsequent reload: resetting to first channel");
                 }
+                // Group the new playlist, and start the channel keys in the group holding whatever
+                // is about to play
+                mNavigator.setChannels(channels, mChannelRepository.getAllChannels());
+                mNavigator.setCurrentGroupIndex(mNavigator.homeGroupFor(mCurrentChannelIndex));
                 // Refresh the list after the index is known, so the highlight matches what plays
                 if (mChannelListComponent != null) {
-                    mChannelListComponent.updateChannels(
-                            mChannelRepository.getAllChannels(), mCurrentChannelIndex);
+                    mChannelListComponent.refreshChannels(mCurrentChannelIndex);
                 }
                 // Hand the channels to the EPG manager now that they are truly available (no
                 // race with reload()). It decides for itself whether the cache still serves or
@@ -192,17 +203,24 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        KeyMapping.Action action = KeyMapping.resolve(event.getKeyCode());
+        if (action == null) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                Log.d(TAG, "No action mapped for keycode: " + event.getKeyCode());
+            }
+            return super.dispatchKeyEvent(event);
+        }
+        // OK is the only key whose short and long press differ, so it is the only one that has to
+        // see the whole press-and-release sequence instead of just the press.
+        if (action == KeyMapping.Action.OK) {
+            return handleOkKey(event);
+        }
         if (event.getAction() != KeyEvent.ACTION_DOWN) {
             return super.dispatchKeyEvent(event);
         }
 
-        Log.d(TAG, "Key pressed: " + event.getKeyCode() + " (" + KeyEvent.keyCodeToString(event.getKeyCode()) + ")");
-        KeyMapping.Action action = KeyMapping.resolve(event.getKeyCode());
-        if (action == null) {
-            Log.d(TAG, "No action mapped for keycode: " + event.getKeyCode());
-            return super.dispatchKeyEvent(event);
-        }
-        Log.d(TAG, "Action: " + action);
+        Log.d(TAG, "Key pressed: " + event.getKeyCode() + " ("
+                + KeyEvent.keyCodeToString(event.getKeyCode()) + "), action: " + action);
 
         switch (action) {
             case CHANNEL_UP:
@@ -223,9 +241,6 @@ public class MainActivity extends Activity {
             case RIGHT:
                 handleFocusRight();
                 return true;
-            case OK:
-                handleOk();
-                return true;
             case MENU:
                 handleMenu();
                 return true;
@@ -240,6 +255,62 @@ public class MainActivity extends Activity {
                 }
                 return super.dispatchKeyEvent(event);
         }
+    }
+
+    /**
+     * Splits OK into its two meanings: released quickly it selects, held down it favourites. The
+     * short press has to wait for the release, otherwise both would fire on the same press.
+     */
+    private boolean handleOkKey(KeyEvent event) {
+        switch (event.getAction()) {
+            case KeyEvent.ACTION_DOWN:
+                if (event.getRepeatCount() == 0) {
+                    mOkLongPressFired = false;
+                    mMainHandler.removeCallbacks(mOkLongPressRunnable);
+                    mMainHandler.postDelayed(mOkLongPressRunnable, OK_LONG_PRESS_MS);
+                } else if (event.isLongPress()) {
+                    // Remotes that report the long press themselves are believed straight away
+                    onOkLongPress();
+                }
+                return true;
+            case KeyEvent.ACTION_UP:
+                mMainHandler.removeCallbacks(mOkLongPressRunnable);
+                if (!mOkLongPressFired) {
+                    handleOk();
+                }
+                mOkLongPressFired = false;
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    /**
+     * Marks or unmarks the channel the viewer is pointing at: the highlighted one when the list is
+     * open, otherwise the one on screen.
+     */
+    private void onOkLongPress() {
+        if (mOkLongPressFired) {
+            return;
+        }
+        mOkLongPressFired = true;
+        mMainHandler.removeCallbacks(mOkLongPressRunnable);
+
+        Channel target = mChannelListVisible && mChannelListComponent != null
+                ? mChannelListComponent.getSelectedChannel()
+                : mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (target == null) {
+            return;
+        }
+        boolean nowFavorite = mNavigator.toggleFavorite(target);
+        Log.i(TAG, (nowFavorite ? "Favourited: " : "Unfavourited: ") + target.name);
+        if (mChannelListComponent != null) {
+            mChannelListComponent.onFavoritesChanged();
+        }
+        android.widget.Toast.makeText(this,
+                getString(nowFavorite ? R.string.favorite_added : R.string.favorite_removed,
+                        target.name),
+                android.widget.Toast.LENGTH_SHORT).show();
     }
 
     /** @return 0-9 for the number actions, or -1 for anything else. */
@@ -276,6 +347,9 @@ public class MainActivity extends Activity {
             mChannelListVisible = false;
         }
         mCurrentChannelIndex = number - 1;
+        // Channel numbers count through the whole playlist, so the one just typed may well be
+        // outside the group being walked; the channel keys carry on from wherever it landed.
+        mNavigator.setCurrentGroupIndex(mNavigator.homeGroupFor(mCurrentChannelIndex));
         playChannel(mCurrentChannelIndex);
     }
 
@@ -313,30 +387,10 @@ public class MainActivity extends Activity {
         Log.d(TAG, "handleChannelUp: mChannelListVisible=" + mChannelListVisible);
 
         if (mChannelListVisible && mChannelListComponent != null) {
-            // If focus is on program list, navigate it (UP always moves up)
-            if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
-                Log.d(TAG, "handleChannelUp: Focus on programs, moving selection up");
-                mChannelListComponent.moveProgramSelection(false); // false = move up
-                return;
-            }
-
-            // Otherwise, navigate channel list (UP = highlight move up = previous channel)
-            int selected = mChannelListComponent.getSelectedChannelIndex();
-            int count = mChannelRepository.getChannelCount();
-            if (count > 0) {
-                selected = (selected - 1 + count) % count; // UP = previous channel
-                Log.d(TAG, "handleChannelUp: Selecting channel: " + selected);
-                mChannelListComponent.selectChannel(selected);
-            }
+            moveSelectionInList(false);
         } else {
             // No channel list visible: change channel (UP = next channel)
-            int count = mChannelRepository.getChannelCount();
-            Log.d(TAG, "handleChannelUp: Channel list not visible, count=" + count);
-            if (count > 0) {
-                mCurrentChannelIndex = (mCurrentChannelIndex + 1) % count;
-                Log.d(TAG, "handleChannelUp: Calling playChannel with index=" + mCurrentChannelIndex);
-                playChannel(mCurrentChannelIndex);
-            }
+            tuneWithinCurrentGroup(1);
         }
     }
 
@@ -348,30 +402,42 @@ public class MainActivity extends Activity {
         mLastChannelSwitchTime = now;
 
         if (mChannelListVisible && mChannelListComponent != null) {
-            // If focus is on program list, navigate it (DOWN always moves down)
-            if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
-                Log.d(TAG, "handleChannelDown: Focus on programs, moving selection down");
-                mChannelListComponent.moveProgramSelection(true); // true = move down
-                return;
-            }
-
-            // Otherwise, navigate channel list (DOWN = highlight move down = next channel)
-            int selected = mChannelListComponent.getSelectedChannelIndex();
-            int count = mChannelRepository.getChannelCount();
-            if (count > 0) {
-                selected = (selected + 1) % count; // DOWN = next channel
-                Log.d(TAG, "handleChannelDown: Selecting channel: " + selected);
-                mChannelListComponent.selectChannel(selected);
-            }
+            moveSelectionInList(true);
         } else {
             // No channel list visible: change channel (DOWN = previous channel)
-            int count = mChannelRepository.getChannelCount();
-            if (count > 0) {
-                mCurrentChannelIndex = (mCurrentChannelIndex - 1 + count) % count;
-                Log.d(TAG, "handleChannelDown: Calling playChannel with index=" + mCurrentChannelIndex);
-                playChannel(mCurrentChannelIndex);
-            }
+            tuneWithinCurrentGroup(-1);
         }
+    }
+
+    /** Up and down move the cursor inside whichever of the three columns has the focus. */
+    private void moveSelectionInList(boolean down) {
+        switch (mChannelListComponent.getFocusPanel()) {
+            case PROGRAMS:
+                mChannelListComponent.moveProgramSelection(down);
+                break;
+            case GROUPS:
+                mChannelListComponent.moveGroupSelection(down);
+                break;
+            default:
+                mChannelListComponent.moveChannelSelection(down);
+                break;
+        }
+    }
+
+    /**
+     * Tunes one channel along the group the viewer chose, wrapping at its ends. Leaving the group
+     * takes opening the list or typing a number, so stepping through a group of favourites does not
+     * drop the viewer into an unrelated part of the playlist.
+     */
+    private void tuneWithinCurrentGroup(int delta) {
+        int next = mNavigator.step(mNavigator.currentGroupIndex(), mCurrentChannelIndex, delta);
+        Log.d(TAG, "tuneWithinCurrentGroup: group=" + mNavigator.currentGroupIndex()
+                + ", from=" + mCurrentChannelIndex + ", to=" + next);
+        if (next < 0) {
+            return;
+        }
+        mCurrentChannelIndex = next;
+        playChannel(mCurrentChannelIndex);
     }
 
     private void handleVolumeUp() {
@@ -392,15 +458,29 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Left steps back through the three columns: programmes, channels, groups. */
     private void handleFocusLeft() {
-        if (mChannelListVisible && mChannelListComponent != null) {
+        if (!mChannelListVisible || mChannelListComponent == null) {
+            return;
+        }
+        if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.PROGRAMS) {
             Log.d(TAG, "handleFocusLeft: Moving focus to channels");
             mChannelListComponent.moveFocusToChannels();
+        } else {
+            Log.d(TAG, "handleFocusLeft: Moving focus to groups");
+            mChannelListComponent.moveFocusToGroups();
         }
     }
 
+    /** Right steps forward through the three columns: groups, channels, programmes. */
     private void handleFocusRight() {
-        if (mChannelListVisible && mChannelListComponent != null) {
+        if (!mChannelListVisible || mChannelListComponent == null) {
+            return;
+        }
+        if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS) {
+            Log.d(TAG, "handleFocusRight: Moving focus to channels");
+            mChannelListComponent.moveFocusToChannels();
+        } else {
             Log.d(TAG, "handleFocusRight: Moving focus to programs");
             mChannelListComponent.moveFocusToPrograms();
         }
@@ -409,8 +489,14 @@ public class MainActivity extends Activity {
     private void handleOk() {
         Log.d(TAG, "handleOk called, mChannelListVisible=" + mChannelListVisible);
         if (mChannelListVisible) {
-            // Confirm channel selection and switch
             if (mChannelListComponent != null) {
+                if (mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS) {
+                    // OK on a group means "let me pick from this one", not "play something"
+                    mChannelListComponent.moveFocusToChannels();
+                    return;
+                }
+                // The group the channel was picked from is the one the channel keys walk from now on
+                mNavigator.setCurrentGroupIndex(mChannelListComponent.getBrowsedGroupIndex());
                 mChannelListComponent.confirmSelection();
             }
             hideChannelList();
@@ -426,8 +512,7 @@ public class MainActivity extends Activity {
 
     private void showChannelList() {
         if (mChannelListComponent == null) {
-            mChannelListComponent = new ChannelListComponent(
-                    this, mChannelRepository.getAllChannels());
+            mChannelListComponent = new ChannelListComponent(this, mNavigator);
             mChannelListComponent.setEpgManager(mEpgManager);
 
             // Set channel selection listener
@@ -439,15 +524,17 @@ public class MainActivity extends Activity {
             // Add to VideoView's parent or create appropriate params
             if (mVideoView.getParent() instanceof android.view.ViewGroup) {
                 android.view.ViewGroup parent = (android.view.ViewGroup) mVideoView.getParent();
+                // The menu measures itself: its columns come and go, so a fixed width would leave
+                // an empty stripe of background behind whichever column is folded away.
                 if (parent instanceof FrameLayout) {
-                    // Menu width: 240 (channels) + 300 (programs) = 540dp
                     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                            dp2px(540), FrameLayout.LayoutParams.MATCH_PARENT);
+                            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.MATCH_PARENT);
                     lp.gravity = android.view.Gravity.START;
                     mChannelListComponent.setLayoutParams(lp);
                 } else {
                     android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(
-                            dp2px(540), android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
+                            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                            android.widget.LinearLayout.LayoutParams.MATCH_PARENT);
                     mChannelListComponent.setLayoutParams(lp);
                 }
                 parent.addView(mChannelListComponent);
@@ -455,8 +542,12 @@ public class MainActivity extends Activity {
         }
         // Always refresh when opening menu to show current channel and program
         if (mChannelListComponent != null) {
+            // The viewer may have changed the opacity in the settings since the menu was built
+            mChannelListComponent.applyOpacity();
             mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
-            mChannelListComponent.selectChannel(mCurrentChannelIndex);
+            // Open on the group the channel keys are walking, with the playing channel highlighted
+            mChannelListComponent.showGroup(mNavigator.currentGroupIndex(), mCurrentChannelIndex);
+            mChannelListComponent.moveFocusToChannels();
             mChannelListComponent.setVisibility(android.view.View.VISIBLE);
         }
     }
@@ -475,6 +566,10 @@ public class MainActivity extends Activity {
         if (isNumberInputActive()) {
             // BACK abandons a half-typed channel number instead of leaving the app.
             cancelNumberInput();
+        } else if (mChannelListVisible && mChannelListComponent != null
+                && mChannelListComponent.getFocusPanel() == ChannelListComponent.FocusPanel.GROUPS) {
+            // The group column was a detour: BACK folds it away again rather than closing the menu.
+            mChannelListComponent.moveFocusToChannels();
         } else if (mChannelListVisible) {
             hideChannelList();
             mChannelListVisible = false;
@@ -635,6 +730,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        // Leaving mid-press must not turn into a favourite once we are no longer on screen
+        mMainHandler.removeCallbacks(mOkLongPressRunnable);
         if (mVideoView != null) {
             mVideoView.pause();
         }
@@ -645,6 +742,7 @@ public class MainActivity extends Activity {
         mDestroyed = true;
         mMainHandler.removeCallbacks(mReconnectRunnable);
         mMainHandler.removeCallbacks(mNumberCommitRunnable);
+        mMainHandler.removeCallbacks(mOkLongPressRunnable);
         // The web server keeps its listener in a static field; leaving ours there would leak
         // this Activity for the whole process lifetime.
         ConfigWebServer.setConfigChangeListener(null);

@@ -32,6 +32,13 @@
     <string name="no_epg_data">No EPG data</string>
     <string name="next_program">Next: %1$s</string>
     <string name="channel_number_unknown">No such channel</string>
+    <string name="groups">Groups</string>
+    <string name="group_favorites">Favorites</string>
+    <string name="group_all">All Channels</string>
+    <string name="favorites_empty">No favorites yet.\n\nHold OK on a channel to add it.</string>
+    <string name="group_empty">This group is empty.</string>
+    <string name="favorite_added">★ %1$s added to favorites</string>
+    <string name="favorite_removed">%1$s removed from favorites</string>
     <string name="m3u_url_saved">M3U URL saved</string>
     <string name="epg_url_saved">EPG URL saved</string>
     <string name="web_server_started">Web server started</string>
@@ -39,4 +46,9 @@
     <string name="epg_display_enabled">EPG display enabled</string>
     <string name="epg_display_disabled">EPG display disabled</string>
     <string name="server_address_format">Address: %1$s</string>
+    <string name="sidebar_opacity">Channel List Background</string>
+    <string name="sidebar_opacity_translucent">Translucent (default)</string>
+    <string name="sidebar_opacity_semi">Semi-opaque</string>
+    <string name="sidebar_opacity_opaque">Opaque</string>
+    <string name="sidebar_opacity_saved">Channel list background updated</string>
 </resources>

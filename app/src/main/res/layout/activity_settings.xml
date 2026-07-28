@@ -162,6 +162,55 @@
 
             </LinearLayout>
 
+            <!-- Channel List Appearance Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/settings_section_bg">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/sidebar_opacity"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <RadioGroup
+                    android:id="@+id/sidebar_opacity_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/sidebar_opacity_translucent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sidebar_opacity_translucent"
+                        android:textColor="@color/text_primary" />
+
+                    <RadioButton
+                        android:id="@+id/sidebar_opacity_semi"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sidebar_opacity_semi"
+                        android:textColor="@color/text_primary" />
+
+                    <RadioButton
+                        android:id="@+id/sidebar_opacity_opaque"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/sidebar_opacity_opaque"
+                        android:textColor="@color/text_primary" />
+
+                </RadioGroup>
+
+            </LinearLayout>
+
 
         </LinearLayout>
 

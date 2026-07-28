@@ -7,6 +7,7 @@ import android.os.Bundle;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,6 +21,7 @@ public class SettingsActivity extends Activity {
     private CheckBox mWebServerToggle;
     private TextView mWebServerAddress;
     private CheckBox mEpgDisplayToggle;
+    private RadioGroup mSidebarOpacityGroup;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,6 +32,7 @@ public class SettingsActivity extends Activity {
         mEpgUrlInput = findViewById(R.id.epg_url_input);
         mWebServerToggle = findViewById(R.id.web_server_toggle);
         mWebServerAddress = findViewById(R.id.web_server_address);
+        mSidebarOpacityGroup = findViewById(R.id.sidebar_opacity_group);
 
         Button saveM3uBtn = findViewById(R.id.save_m3u_btn);
         Button saveEpgBtn = findViewById(R.id.save_epg_btn);
@@ -59,6 +62,34 @@ public class SettingsActivity extends Activity {
                         Toast.LENGTH_SHORT).show();
             });
         }
+
+        if (mSidebarOpacityGroup != null) {
+            mSidebarOpacityGroup.setOnCheckedChangeListener((group, checkedId) -> {
+                AppConfig.setSidebarOpacity(opacityOf(checkedId));
+                Toast.makeText(this, R.string.sidebar_opacity_saved, Toast.LENGTH_SHORT).show();
+            });
+        }
+    }
+
+    private static int opacityOf(int checkedId) {
+        if (checkedId == R.id.sidebar_opacity_opaque) {
+            return AppConfig.SIDEBAR_OPAQUE;
+        }
+        if (checkedId == R.id.sidebar_opacity_semi) {
+            return AppConfig.SIDEBAR_SEMI_OPAQUE;
+        }
+        return AppConfig.SIDEBAR_TRANSLUCENT;
+    }
+
+    private static int radioIdOf(int opacity) {
+        switch (opacity) {
+            case AppConfig.SIDEBAR_OPAQUE:
+                return R.id.sidebar_opacity_opaque;
+            case AppConfig.SIDEBAR_SEMI_OPAQUE:
+                return R.id.sidebar_opacity_semi;
+            default:
+                return R.id.sidebar_opacity_translucent;
+        }
     }
 
     private void loadValues() {
@@ -67,6 +98,11 @@ public class SettingsActivity extends Activity {
         mWebServerToggle.setChecked(AppConfig.isWebServerEnabled());
         if (mEpgDisplayToggle != null) {
             mEpgDisplayToggle.setChecked(AppConfig.isEpgDisplayEnabled());
+        }
+        if (mSidebarOpacityGroup != null) {
+            // Checked before the listener is attached, so restoring the saved value is not
+            // mistaken for the viewer choosing it again.
+            mSidebarOpacityGroup.check(radioIdOf(AppConfig.getSidebarOpacity()));
         }
         updateWebServerAddress();
     }
