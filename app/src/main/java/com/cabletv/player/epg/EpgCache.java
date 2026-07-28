@@ -33,7 +33,8 @@ public class EpgCache {
     private static final String CACHE_FILE = "epg_programs.json";
     private static final String META_FILE = "epg_meta.json";
     // 2: programmes are keyed by normalised channel name instead of the (non-unique) tvg-id.
-    private static final int CACHE_VERSION = 2;
+    // 3: repeated programmes are dropped at parse time; caches written before that still hold them.
+    private static final int CACHE_VERSION = 3;
 
     private final File mCacheDir;
     private final File mCacheFile;

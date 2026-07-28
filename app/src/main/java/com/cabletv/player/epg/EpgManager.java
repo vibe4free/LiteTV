@@ -488,10 +488,12 @@ public class EpgManager {
         if (startTime <= 0) {
             return;
         }
-        // One feed channel can serve several playlist entries ("四川卫视" and "四川卫视4K"),
-        // which share the programme instance.
-        Program program = new Program(title, startTime, parseXmltvTime(stop));
+        // One feed channel can serve several playlist entries ("四川卫视" and "四川卫视4K").
+        // Each gets its own instance: fixMissingEndTimes writes endTime, and a shared instance
+        // would let one list's correction overwrite another's.
+        long endTime = parseXmltvTime(stop);
         for (String key : keys) {
+            Program program = new Program(title, startTime, endTime);
             List<Program> programs = programsByChannel.get(key);
             if (programs == null) {
                 programs = new ArrayList<>();
@@ -688,8 +690,7 @@ public class EpgManager {
             stream = connection.getInputStream();
             String json = readAsString(stream, MAX_DIYP_BYTES);
             List<Program> programs = parseDiypPrograms(json);
-            Collections.sort(programs, PROGRAM_ORDER);
-            fixMissingEndTimes(programs);
+            normalizeProgramList(programs);
             return programs;
         } finally {
             closeQuietly(stream);
@@ -843,10 +844,54 @@ public class EpgManager {
     private static void finalizePrograms(Map<String, List<Program>> programsByChannel) {
         for (Map.Entry<String, List<Program>> entry : programsByChannel.entrySet()) {
             List<Program> programs = entry.getValue();
-            Collections.sort(programs, PROGRAM_ORDER);
-            fixMissingEndTimes(programs);
+            normalizeProgramList(programs);
             entry.setValue(Collections.unmodifiableList(programs));
         }
+    }
+
+    /** Puts a freshly parsed list in order, drops repeats, and patches broken stop times. */
+    private static void normalizeProgramList(List<Program> programs) {
+        Collections.sort(programs, PROGRAM_ORDER);
+        dropDuplicates(programs);
+        fixMissingEndTimes(programs);
+    }
+
+    /**
+     * Feeds are routinely built by concatenating two scrapes of the same day, so half the
+     * schedule appears twice — 254 of the 561 channels in the feed this was tested against.
+     * The list is sorted by start time, so the copies are adjacent.
+     *
+     * <p>Runs before {@link #fixMissingEndTimes}: a truncated scrape leaves its last item with
+     * a stop time that precedes its start, and dropping that one in favour of the intact copy
+     * is better than patching it.
+     */
+    private static void dropDuplicates(List<Program> programs) {
+        int kept = 0;
+        for (int i = 0; i < programs.size(); i++) {
+            Program program = programs.get(i);
+            int twin = -1;
+            // Only items sharing a start time can be repeats, and they sit together.
+            for (int j = kept - 1; j >= 0 && programs.get(j).startTime == program.startTime; j--) {
+                if (equalTitles(programs.get(j).title, program.title)) {
+                    twin = j;
+                    break;
+                }
+            }
+            if (twin < 0) {
+                programs.set(kept++, program);
+            } else if (programs.get(twin).endTime <= programs.get(twin).startTime
+                    && program.endTime > program.startTime) {
+                // Same programme, but this copy has a usable stop time.
+                programs.set(twin, program);
+            }
+        }
+        while (programs.size() > kept) {
+            programs.remove(programs.size() - 1);
+        }
+    }
+
+    private static boolean equalTitles(String first, String second) {
+        return first == null ? second == null : first.equals(second);
     }
 
     /** Feeds sometimes omit or mangle the stop time; run such an item up to the next one. */
