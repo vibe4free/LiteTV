@@ -90,7 +90,7 @@ M3U / EPG 地址配置与 Web 服务器信息（MENU 键打开）：
 - **Android TV / Google TV** 或支持 Leanback 的 Android 设备（**Android 5.1+，API 21+**）
 - 内存建议 ≥ 512MB，支持硬件解码
 
-### 方式一：GitHub Release 下载（推荐）
+### GitHub Release 下载
 
 从 **[GitHub Releases](https://github.com/vibe4free/LiteTV/releases) 页面下载最新版 APK**（`LiteTV-vX.Y.Z.apk`），拷贝到设备后直接安装。
 
@@ -100,21 +100,6 @@ adb install -r LiteTV-vX.Y.Z.apk
 ```
 
 > Release 版已启用代码混淆（R8）与资源压缩，APK 体积更小。
-
-### 方式二：自行构建
-
-```bash
-# 环境要求：JDK 17、Android SDK（compileSdk 34）
-cd cabletv-player
-
-# Debug 版（无需签名，构建产物：app/build/outputs/apk/debug/app-debug.apk）
-./gradlew :app:assembleDebug
-
-# Release 版（需要 gradle.properties 中的签名配置）
-./gradlew :app:assembleRelease
-```
-
-> Release 签名配置位于 `gradle.properties`（`keystore/litetv.keystore`，模板见 `gradle.properties.example`），正式分发前请替换为你自己的签名密钥。
 
 ---
 
@@ -132,62 +117,6 @@ cd cabletv-player
 5. 按 **OK** 打开频道列表，**UP/DOWN** 换台，**数字键**直达频道
 
 > 也可以直接用手机/电脑浏览器访问 `http://电视IP:8899` 完成上述配置。
-
----
-
-## 🛠️ 技术架构
-
-```
-app 模块                        player 模块
-┌──────────────────────┐       ┌──────────────────────────┐
-│ MainActivity         │       │ DKPlayer 裁剪版           │
-│  ├─ ChannelList      │       │  ├─ VideoView (switchUrl) │
-│  ├─ PlaybackInfo     │ ───▶  │  ├─ ExoMediaPlayer       │
-│  ├─ ChannelNumber    │       │  └─ TextureRenderView     │
-│  └─ PlaybackStatus   │       └──────────────────────────┘
-│ ChannelRepository    │               ExoPlayer 2.19.1
-│ ChannelNavigator     │           (HLS / DASH / HTTP)
-│ EpgManager + EpgCache│
-│ ConfigWebServer      │
-│ AppConfig (Hawk)     │
-└──────────────────────┘
-```
-
-| 组件 | 说明 |
-|------|------|
-| **player 模块** | 播放器封装（ExoPlayer-only，移除 ijkplayer/RTMP/RTSP） |
-| **M3uParser** | M3U/TXT 解析：分组、台标、多源、自定义请求头 |
-| **EpgManager / EpgCache** | EPG 多格式解析、批量加载、磁盘缓存、XXE 防护 |
-| **ChannelNavigator** | 分组/收藏导航与全局频道号换算 |
-| **ConfigWebServer** | 内置 Socket HTTP 配置服务器（远程配置） |
-| **AppConfig** | Hawk 加密持久化配置 |
-
-### 支持的直播协议
-- HTTP / HTTPS
-- HLS（m3u8）
-- DASH（MPD）
-- MPEG-TS 流
-
----
-
-## 🧪 测试验证
-
-- 已在 **Android 6.0 (API 23) Android TV 模拟器** 上完成安装、频道加载、ExoPlayer 播放验证
-- 支持公开 HLS 测试流（Big Buck Bunny、Tears of Steel、Apple BipBop 等）
-- 详见 [QUICK_START.md](QUICK_START.md) 与 [FINAL_STATUS.md](FINAL_STATUS.md)
-
----
-
-## 📚 相关文档
-
-| 文档 | 内容 |
-|------|------|
-| [QUICK_START.md](QUICK_START.md) | 快速上手与 ADB 调试指南 |
-| [RELEASE_BUILD.md](RELEASE_BUILD.md) | Release 签名构建指南 |
-| [XMLTV_INTEGRATION.md](XMLTV_INTEGRATION.md) | XMLTV EPG 接入说明 |
-| [EPG_FORMATS.md](EPG_FORMATS.md) | 支持的 EPG 格式规范 |
-| [WEB_SERVER_USAGE.md](WEB_SERVER_USAGE.md) | Web 配置服务器使用指南 |
-| [KEY_NAVIGATION_GUIDE.md](KEY_NAVIGATION_GUIDE.md) | 遥控器按键导航说明 |
 
 ---
 
