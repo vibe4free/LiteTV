@@ -120,6 +120,15 @@ adb install -r LiteTV-vX.Y.Z.apk
 
 ---
 
+## 🙏 致谢
+
+本项目在开发与测试过程中受到以下开源项目的启发与帮助：
+
+- [**rtp2httpd**](https://github.com/stackia/rtp2httpd) — RTP 流转 HTTP 工具，项目的直播源思路与测试基础
+- [**ExoPlayer**](https://github.com/google/exoplayer) — 强大的 Android 媒体播放器框架，本项目的播放核心
+
+---
+
 ## ⚠️ 免责声明
 
 本项目为通用播放器工具，不提供任何直播源。请仅配置你拥有合法播放权限的内容源，遵守当地法律法规及内容版权规定。
