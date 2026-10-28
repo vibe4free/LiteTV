@@ -183,10 +183,31 @@ public final class ExoMediaSourceHelper {
      */
     private OkHttpDataSource.Factory getHttpDataSourceFactory() {
         if (mHttpDataSourceFactory == null) {
-            OkHttpClient client = mClient != null ? mClient : new OkHttpClient.Builder().build();
+            OkHttpClient client = mClient != null ? mClient : defaultStreamingClient();
             mHttpDataSourceFactory = new OkHttpDataSource.Factory(client);
         }
         return mHttpDataSourceFactory;
+    }
+
+    /**
+     * Client for live streams: no connection pooling, no transparent gzip.
+     *
+     * <p>A multicast-to-HTTP bridge (rtp2httpd 等) answers each stream request with
+     * {@code Connection: close} and closes the socket when the upstream ends. OkHttp keeps
+     * finished connections in its pool for five minutes; a later play attempt reused one of those
+     * dead sockets and surfaced as "unexpected end of stream" before any bytes were requested --
+     * seen on an Android 6 television against a working server, while other clients played fine.
+     * Zero reuse removes that class of failure, and a stream connection is not a resource worth
+     * pooling anyway: it lives as long as the channel is being watched.
+     */
+    private static OkHttpClient defaultStreamingClient() {
+        return new OkHttpClient.Builder()
+                // ConnectionPool requires a positive keep-alive; an explicit zero-duration pool
+                // throws IllegalArgumentException on OkHttp 3.12 (seen on the MiTV). Setting the
+                // pool to zero *connections* is the supported way to disable reuse.
+                .connectionPool(new okhttp3.ConnectionPool(0, 5, java.util.concurrent.TimeUnit.SECONDS))
+                .retryOnConnectionFailure(true)
+                .build();
     }
 
     private void applyHeaders(Map<String, String> headers) {
