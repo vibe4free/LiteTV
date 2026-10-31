@@ -38,6 +38,9 @@ public class SettingsActivityTest {
     public void setUp() throws Exception {
         AppConfig.setM3uFilePath("");
         AppConfig.setM3uUrl("");
+        // The updater stores when it last checked; without clearing it, a leftover timestamp from
+        // an earlier test makes the "never checked" line fail.
+        AppConfig.setUpdateLastCheckMs(0L);
         mLocalFile = new File(RuntimeEnvironment.getApplication().getCacheDir(), "picker-test.m3u");
         try (FileOutputStream f = new FileOutputStream(mLocalFile)) {
             f.write("#EXTM3U\n#EXTINF:-1,C\nhttp://s\n".getBytes(StandardCharsets.UTF_8));
