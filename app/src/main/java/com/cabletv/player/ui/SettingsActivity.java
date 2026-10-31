@@ -615,15 +615,23 @@ public class SettingsActivity extends Activity implements UpdateManager.Listener
     }
 
     private void renderLastCheck() {
-        long lastCheckMs = AppConfig.getUpdateLastCheckMs();
+        mUpdateLastCheckText.setText(formatLastCheck(this, AppConfig.getUpdateLastCheckMs()));
+    }
+
+    /**
+     * The line that says when the last check happened.
+     *
+     * <p>Kept apart from the view so the wording can be checked directly: a timestamp of zero
+     * means the app has never looked for an update.
+     */
+    static String formatLastCheck(Context context, long lastCheckMs) {
         if (lastCheckMs <= 0L) {
-            mUpdateLastCheckText.setText(R.string.update_never_checked);
-            return;
+            return context.getString(R.string.update_never_checked);
         }
         Date when = new Date(lastCheckMs);
-        String stamp = android.text.format.DateFormat.getMediumDateFormat(this).format(when)
-                + " " + android.text.format.DateFormat.getTimeFormat(this).format(when);
-        mUpdateLastCheckText.setText(getString(R.string.update_last_check_format, stamp));
+        String stamp = android.text.format.DateFormat.getMediumDateFormat(context).format(when)
+                + " " + android.text.format.DateFormat.getTimeFormat(context).format(when);
+        return context.getString(R.string.update_last_check_format, stamp);
     }
 
     @Override

@@ -33,6 +33,7 @@ public class TimeShiftBarComponent extends FrameLayout {
     private final TextView mBackToLive;
     private final TextView mWindowLabel;
     private final TextView mTargetLabel;
+    private final TextView mRateLabel;
     private final SeekBar mSeekBar;
     private OnSeekListener mSeekListener;
     private static final long AUTO_HIDE_MS = 6_000;
@@ -86,6 +87,15 @@ public class TimeShiftBarComponent extends FrameLayout {
         header.addView(mBackToLive, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        mRateLabel = new TextView(context);
+        mRateLabel.setTextColor(0xFFFF9966);
+        mRateLabel.setTextSize(12);
+        mRateLabel.setGravity(Gravity.CENTER);
+        mRateLabel.setVisibility(GONE);
+        FrameLayout.LayoutParams rateLp = new FrameLayout.LayoutParams(
+                dp2px(56), dp2px(22), Gravity.CENTER_VERTICAL | Gravity.END);
+        addView(mRateLabel, rateLp);
 
         mSeekBar = new SeekBar(context);
         mSeekBar.setMax(1000);
@@ -143,6 +153,55 @@ public class TimeShiftBarComponent extends FrameLayout {
         updateLabels();
         if (mSeekListener != null) {
             mSeekListener.onSeekTo(mPositionMs);
+        }
+    }
+
+    /**
+     * Keeps the strip on screen while the viewer is seeking with the remote.
+     *
+     * <p>It normally fades away after six seconds; during a seek the rate indicator has to stay
+     * visible, or the viewer is told nothing about what the key is doing.
+     */
+    public void showWhileSeeking() {
+        removeCallbacks(mAutoHideRunnable);
+        clearAnimation();
+        // The fade-out leaves the alpha at zero, so the bar would stay invisible if only the
+        // visibility were restored.
+        setAlpha(1f);
+        setVisibility(VISIBLE);
+    }
+
+    /**
+     * Shows the acceleration rate while the remote is held down (2x, 3x, 4x), the way the
+     * Apple TV remote reports the speed it is rewinding at.
+     */
+    public void showSeekRate(int rate) {
+        if (mRateLabel == null) {
+            return;
+        }
+        mRateLabel.setText(rate + "x");
+        mRateLabel.setVisibility(VISIBLE);
+    }
+
+    /**
+     * Shows the rate the key is seeking at and how far it has travelled.
+     *
+     * <p>Both belong on screen at once: the rate says how fast the playhead moves, the distance
+     * says where it is going.
+     */
+    public void showSeekPreview(int rate, long deltaMs) {
+        if (mRateLabel == null) {
+            return;
+        }
+        long seconds = Math.abs(deltaMs) / 1000;
+        mRateLabel.setText(rate + "x · " + (deltaMs < 0 ? "-" : "+") + seconds + "s");
+        mRateLabel.setVisibility(VISIBLE);
+    }
+
+    /** Hides the rate indicator when the key is released. */
+    public void hideSeekRate() {
+        if (mRateLabel != null) {
+            mRateLabel.setVisibility(GONE);
         }
     }
 
@@ -223,6 +282,8 @@ public class TimeShiftBarComponent extends FrameLayout {
 
     public void show() {
         removeCallbacks(mAutoHideRunnable);
+        clearAnimation();
+        setAlpha(1f);
         setVisibility(VISIBLE);
         scheduleAutoHide();
     }

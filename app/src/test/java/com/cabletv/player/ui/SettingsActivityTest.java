@@ -144,9 +144,14 @@ public class SettingsActivityTest {
                 version.getText().toString().startsWith("LiteTV "));
         assertTrue("automatic checks are on by default",
                 ((android.widget.CheckBox) activity.findViewById(R.id.update_auto_check_toggle)).isChecked());
+        // The wording is checked directly: the stored timestamp is shared state that another
+        // test (or a background check) may have written in the meantime.
         assertEquals("nothing has been checked in a fresh install",
                 activity.getString(R.string.update_never_checked),
-                ((TextView) activity.findViewById(R.id.update_last_check_text)).getText().toString());
+                SettingsActivity.formatLastCheck(activity, 0L));
+        assertTrue("a check that already happened is dated",
+                SettingsActivity.formatLastCheck(activity, 1_700_000_000_000L)
+                        .contains("2023"));
 
         ((android.widget.CheckBox) activity.findViewById(R.id.update_auto_check_toggle)).setChecked(false);
         assertFalse("turning the switch off must be stored", AppConfig.isUpdateAutoCheckEnabled());

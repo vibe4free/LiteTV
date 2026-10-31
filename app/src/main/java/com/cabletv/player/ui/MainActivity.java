@@ -82,7 +82,7 @@ public class MainActivity extends Activity {
     private EpgManager.Program mCatchupProgram = null;
     /** The catchup playhead (programme start + accumulated seek offset), in epoch millis. */
     private long mCatchupPlayheadMs = 0;
-    private static final long CATCHUP_SEEK_STEP_MS = 10 * 1000L;
+    private static final long CATCHUP_SEEK_STEP_MS = SeekKeyPolicy.STEP_MS;
     /** How far to rewind from "now" when live LEFT enters 回看 without EPG data. */
     private static final long CATCHUP_REWIND_MS = 2 * 60 * 1000L;
     /** How far past "now" a still-airing programme's window may extend before the server catches up. */
@@ -98,11 +98,42 @@ public class MainActivity extends Activity {
     /** How long OK must be held to mean "long press" rather than "select". */
     private static final long OK_LONG_PRESS_MS = 600;
     private final Runnable mOkLongPressRunnable = this::onOkLongPress;
+
+    // Seeking with the remote: a press steps, a held press accelerates (the Apple TV remote
+    // cycles 2x, 3x, 4x while it is held).
+    /**
+     * The platform's own long-press timeout, so a remote that reports a long press is believed.
+     *
+     * <p>It is read when the activity starts, not in a static initializer: the framework call is
+     * not available to plain unit tests, and a failing static initializer would take the whole
+     * class down with it.
+     */
+    private long mSeekLongPressMs = 500L;
+    private static final int[] SEEK_RATES = SeekKeyPolicy.RATES;
+    /** How long a rate is held before the seek speeds up to the next one. */
+    private static final long SEEK_RATE_STEP_MS = SeekKeyPolicy.RATE_STEP_MS;
+    private static final long SEEK_RATE_TICK_MS = SeekKeyPolicy.TICK_MS;
+    private boolean mSeekLongPressFired;
+    private int mSeekRateIndex;
+    /** When the current seek rate was entered, used to climb to the next one. */
+    private long mSeekRateStepAtMs;
+    private long mSeekAccumulatedMs;
+    private long mSeekHoldStartMs;
+    private long mSeekPressAtMs;
+    /** True between the down and the up of a press this handler took. */
+    private boolean mSeekPressActive;
+    private int mSeekDirection;
+    private final Runnable mSeekRateRunnable = this::onSeekRateTick;
+    /** Fires once if the key is still down: that is a hold, so the seek accelerates. */
+    private final Runnable mSeekLongPressRunnable = this::startSeekAcceleration;
     private boolean mOkLongPressFired = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // The framework decides how long a key counts as "held"; a remote that reports a long
+        // press of its own is believed either way.
+        mSeekLongPressMs = android.view.ViewConfiguration.getLongPressTimeout();
         ImmersiveMode.apply(this);
         setContentView(R.layout.activity_main);
 
@@ -351,6 +382,14 @@ public class MainActivity extends Activity {
         // see the whole press-and-release sequence instead of just the press.
         if (action == KeyMapping.Action.OK) {
             return handleOkKey(event);
+        }
+        if (action == KeyMapping.Action.LEFT || action == KeyMapping.Action.RIGHT) {
+            // A seek needs the whole press-and-release sequence, so that a held press can
+            // accelerate. Outside a seek (the list is open and the cursor moves between columns)
+            // the keys keep their plain meaning.
+            if (handleSeekDirectionKey(event, action)) {
+                return true;
+            }
         }
         if (event.getAction() != KeyEvent.ACTION_DOWN) {
             return super.dispatchKeyEvent(event);
@@ -625,6 +664,161 @@ public class MainActivity extends Activity {
             default:
                 return true;
         }
+    }
+
+    /**
+     * Whether the horizontal keys currently mean "move the playhead".
+     *
+     * <p>Yes while the time-shift bar is on screen (the viewer is adjusting the playhead, not
+     * browsing the list) and while a catchup is running. Otherwise the keys keep their plain
+     * meaning: switching columns in the list, paging the guide by a day.
+     */
+    private boolean seekKeysApply() {
+        boolean barVisible = mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE;
+        return SeekKeyPolicy.applies(mCatchupActive, barVisible);
+    }
+
+    /**
+     * Handles LEFT and RIGHT while they mean "seek".
+     *
+     * <p>A press steps ten seconds; holding the key accelerates through 2x, 3x and 4x and the
+     * accumulated distance is applied when the key is released -- the way the Apple TV remote
+     * behaves, and far easier than nudging a ten-second step to reach a missed passage.
+     *
+     * @return true when the event was consumed here
+     */
+    private boolean handleSeekDirectionKey(KeyEvent event, KeyMapping.Action action) {
+        if (!seekKeysApply()) {
+            return false;
+        }
+        switch (event.getAction()) {
+            case KeyEvent.ACTION_DOWN:
+                if (event.getRepeatCount() == 0) {
+                    mSeekPressActive = true;
+                    mSeekLongPressFired = false;
+                    mSeekAccumulatedMs = 0;
+                    // Every press starts over at the slowest rate, the way the Apple TV remote
+                    // behaves: hold once for 2x, keep holding to climb to 3x and 4x.
+                    mSeekRateIndex = 0;
+                    mSeekRateStepAtMs = 0;
+                    mSeekPressAtMs = android.os.SystemClock.uptimeMillis();
+                    mSeekHoldStartMs = mSeekPressAtMs;
+                    mSeekDirection = action == KeyMapping.Action.LEFT ? -1 : 1;
+                    // One shot: it decides whether the key is being held. The accelerating
+                    // ticker is started by startSeekAcceleration() alone -- two tickers running at
+                    // once would each count the same elapsed time and double the distance.
+                    mMainHandler.removeCallbacks(mSeekLongPressRunnable);
+                    mMainHandler.postDelayed(mSeekLongPressRunnable, mSeekLongPressMs);
+                } else if (event.isLongPress()) {
+                    // Some remotes report the long press on the first down; the direction has to
+                    // be known even then, or the release would seek nowhere.
+                    if (!mSeekPressActive) {
+                        mSeekPressActive = true;
+                        mSeekDirection = action == KeyMapping.Action.LEFT ? -1 : 1;
+                        mSeekPressAtMs = android.os.SystemClock.uptimeMillis();
+                    }
+                    startSeekAcceleration();
+                }
+                return true;
+            case KeyEvent.ACTION_UP:
+                if (!mSeekPressActive) {
+                    // The press that opened the catchup was handled elsewhere; its release must
+                    // not be treated as a seek with an unknown direction.
+                    return true;
+                }
+                mSeekPressActive = false;
+                mMainHandler.removeCallbacks(mSeekRateRunnable);
+                mMainHandler.removeCallbacks(mSeekLongPressRunnable);
+                // How long the key was held decides, rather than whether a timer happened to fire
+                // first: a remote that reports its own long press, and an injected hold, both end
+                // up here.
+                boolean heldLong = mSeekLongPressFired
+                        || android.os.SystemClock.uptimeMillis() - mSeekPressAtMs >= mSeekLongPressMs;
+                if (heldLong) {
+                    // A hold always moves at least one step, even when it was too brief for the
+                    // accelerated distance to add up to anything.
+                    long distance = Math.max(mSeekAccumulatedMs,
+                            (long) mSeekDirection * CATCHUP_SEEK_STEP_MS);
+                    applySeekOffset(distance);
+                    mSeekAccumulatedMs = 0;
+                } else {
+                    applySeekOffset((long) mSeekDirection * CATCHUP_SEEK_STEP_MS);
+                }
+                mSeekLongPressFired = false;
+                if (mTimeShiftBar != null) {
+                    mTimeShiftBar.hideSeekRate();
+                }
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    /** Starts the accelerated seek; each held press moves on to the next rate. */
+    private void startSeekAcceleration() {
+        if (mSeekLongPressFired) {
+            return;
+        }
+        mSeekLongPressFired = true;
+        if (mTimeShiftBar != null) {
+            // The strip normally fades away; during a seek it has to stay so the rate is visible.
+            mTimeShiftBar.showWhileSeeking();
+        }
+        mSeekRateIndex = 0;
+        mSeekRateStepAtMs = android.os.SystemClock.uptimeMillis();
+        mSeekHoldStartMs = android.os.SystemClock.uptimeMillis();
+        if (mTimeShiftBar != null) {
+            mTimeShiftBar.showSeekRate(SEEK_RATES[mSeekRateIndex]);
+        }
+        // The ticker is the only thing that counts the distance; make sure there is exactly one.
+        mMainHandler.removeCallbacks(mSeekRateRunnable);
+        mMainHandler.postDelayed(mSeekRateRunnable, SEEK_RATE_TICK_MS);
+    }
+
+    /** Adds the distance covered since the last tick and keeps the bar in step. */
+    private void onSeekRateTick() {
+        if (!mSeekLongPressFired) {
+            return;
+        }
+        long now = android.os.SystemClock.uptimeMillis();
+        long elapsed = now - mSeekHoldStartMs;
+        mSeekHoldStartMs = now;
+        mSeekAccumulatedMs += SeekKeyPolicy.distance(elapsed,
+                SEEK_RATES[mSeekRateIndex], mSeekDirection);
+        // Keep holding and the speed climbs: 2x, then 3x, then 4x.
+        if (now - mSeekRateStepAtMs >= SEEK_RATE_STEP_MS) {
+            mSeekRateStepAtMs = now;
+            mSeekRateIndex = SeekKeyPolicy.nextRateIndex(mSeekRateIndex);
+            if (mTimeShiftBar != null) {
+                mTimeShiftBar.showSeekRate(SEEK_RATES[mSeekRateIndex]);
+            }
+        }
+        if (mTimeShiftBar != null) {
+            mTimeShiftBar.showSeekPreview(SEEK_RATES[mSeekRateIndex], mSeekAccumulatedMs);
+        }
+        mMainHandler.postDelayed(mSeekRateRunnable, SEEK_RATE_TICK_MS);
+    }
+
+    /**
+     * Moves the playhead by a signed distance.
+     *
+     * <p>In a catchup that is a plain step. On live it enters the catchup window at the requested
+     * position, which is what a rewind from live means.
+     */
+    private void applySeekOffset(long deltaMs) {
+        if (deltaMs == 0) {
+            return;
+        }
+        if (mCatchupActive) {
+            seekCatchup(deltaMs);
+            return;
+        }
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null || !channel.hasCatchup()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        handleTimeShiftSeek(now + deltaMs);
     }
 
     /**
@@ -1022,6 +1216,12 @@ public class MainActivity extends Activity {
             }
             return;
         }
+        // While the time-shift bar is on screen the horizontal keys move the playhead, even with
+        // the list open: the viewer is adjusting the catchup position, not browsing the columns.
+        if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
+            applySeekOffset(-CATCHUP_SEEK_STEP_MS);
+            return;
+        }
         // Inside the programme column, LEFT steps back a day. When there is no earlier day (most
         // feeds carry today alone) it folds back to the channels instead of doing nothing, so the
         // key is never a dead end; the ends of the list page the days as well (moveSelectionInList).
@@ -1038,6 +1238,11 @@ public class MainActivity extends Activity {
 
     /** Right steps forward through the three columns: groups, channels, programmes. */
     private void handleFocusRight() {
+        // The time-shift bar owns the horizontal keys while it is on screen.
+        if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
+            applySeekOffset(CATCHUP_SEEK_STEP_MS);
+            return;
+        }
         if (!mChannelListVisible || mChannelListComponent == null) {
             // Full-screen RIGHT fast-forwards the catchup playhead.
             if (mCatchupActive) {
