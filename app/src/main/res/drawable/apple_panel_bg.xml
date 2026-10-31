@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The panel slides in from the right. The picture stays visible on the left, so the panel is
+    nearly opaque but not quite: a hint of the video behind it keeps the two together.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/apple_panel_bg" />
+</shape>

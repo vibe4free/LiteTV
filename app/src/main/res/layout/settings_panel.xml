@@ -1,0 +1,639 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The settings as a panel that slides in over the picture.
+
+    The look follows the Apple TV settings screen: a black ground, one accent colour, a large
+    title and generous spacing between the sections instead of boxes around them. The section
+    headings stay in the accent colour so the eye can find them from across the room.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settings_panel_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/apple_panel_bg"
+    android:focusable="true"
+    android:descendantFocusability="afterDescendants">
+
+    <!-- The edge that separates the picture from the panel. -->
+    <View
+        android:layout_width="3dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@drawable/apple_panel_edge" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/settings"
+            android:textColor="@color/apple_text_primary"
+            android:textSize="28sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/settings_overlay_hint"
+            android:textColor="@color/apple_text_secondary"
+            android:textSize="13sp" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="20dp"
+            android:scrollbarStyle="outsideOverlay"
+            android:descendantFocusability="afterDescendants">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- ================= Play source ================= -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/play_source"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/m3u_url"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <EditText
+                    android:id="@+id/m3u_url_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/apple_pill_input"
+                    android:inputType="textUri"
+                    android:padding="12dp"
+                    android:textColor="@color/apple_text_primary"
+                    android:textColorHint="@color/apple_text_secondary"
+                    android:textSize="15sp" />
+
+                <Button
+                    android:id="@+id/save_m3u_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/apple_pill_button"
+                    android:focusable="true"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/save"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="@string/local_m3u_file"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/m3u_file_path_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/pick_m3u_file_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/apple_pill_button"
+                    android:focusable="true"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/m3u_file_pick"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <Button
+                    android:id="@+id/scan_m3u_file_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/apple_pill_button"
+                    android:focusable="true"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/m3u_scan_import"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/m3u_drop_dir_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/clear_m3u_file_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/apple_pill_button"
+                    android:focusable="true"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/m3u_file_clear"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/merge_same_name_channels"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <com.cabletv.player.ui.ToggleSwitchView
+                        android:id="@+id/merge_same_name_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/merge_same_name_hint"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/m3u_file_priority_hint"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <!-- ================= EPG source ================= -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:text="@string/epg_source"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/epg_url"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <EditText
+                    android:id="@+id/epg_url_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/apple_pill_input"
+                    android:inputType="textUri"
+                    android:padding="12dp"
+                    android:textColor="@color/apple_text_primary"
+                    android:textColorHint="@color/apple_text_secondary"
+                    android:textSize="15sp" />
+
+                <Button
+                    android:id="@+id/save_epg_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/apple_pill_button"
+                    android:focusable="true"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/save"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/show_epg_in_channel_list"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <com.cabletv.player.ui.ToggleSwitchView
+                        android:id="@+id/epg_display_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/epg_preference_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:text="@string/epg_preference"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <RadioGroup
+                    android:id="@+id/epg_preference_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/epg_preference_auto"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/epg_preference_auto"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <RadioButton
+                        android:id="@+id/epg_preference_m3u"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/epg_preference_m3u"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <RadioButton
+                        android:id="@+id/epg_preference_user"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/epg_preference_user"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+                </RadioGroup>
+
+                <TextView
+                    android:id="@+id/epg_m3u_embedded"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <!-- ================= Channel list background ================= -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:text="@string/sidebar_opacity"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <RadioGroup
+                    android:id="@+id/sidebar_opacity_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/sidebar_opacity_translucent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/sidebar_opacity_translucent"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <RadioButton
+                        android:id="@+id/sidebar_opacity_semi"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/sidebar_opacity_semi"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <RadioButton
+                        android:id="@+id/sidebar_opacity_opaque"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/sidebar_opacity_opaque"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+                </RadioGroup>
+
+                <!-- ================= Playback ================= -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:text="@string/playback_section"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/video_render_mode"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <RadioGroup
+                    android:id="@+id/video_render_mode_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/video_render_surface"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/video_render_surface"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <RadioButton
+                        android:id="@+id/video_render_texture"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/video_render_texture"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/video_decode_mode"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <RadioGroup
+                    android:id="@+id/video_decode_mode_group"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:id="@+id/video_decode_auto"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/video_decode_auto"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <RadioButton
+                        android:id="@+id/video_decode_hardware"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/video_decode_hardware"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <RadioButton
+                        android:id="@+id/video_decode_software"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/apple_row_focus"
+                        android:buttonTint="@color/colorAccent"
+                        android:padding="6dp"
+                        android:text="@string/video_decode_software"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+                </RadioGroup>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/video_tunneling"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <com.cabletv.player.ui.ToggleSwitchView
+                        android:id="@+id/video_tunneling_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="@string/playback_settings_hint"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <!-- ================= Web server ================= -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:text="@string/web_server"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/web_server_enabled"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <com.cabletv.player.ui.ToggleSwitchView
+                        android:id="@+id/web_server_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/web_server_address"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="13sp" />
+
+                <!-- ================= About and updates ================= -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="28dp"
+                    android:text="@string/update_section"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/app_version_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/update_auto_check"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <com.cabletv.player.ui.ToggleSwitchView
+                        android:id="@+id/update_auto_check_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/update_auto_check_hint"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/update_status_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/update_changelog_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/update_last_check_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/check_update_btn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/apple_pill_button"
+                    android:focusable="true"
+                    android:paddingStart="20dp"
+                    android:paddingEnd="20dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/update_check_now"
+                    android:textColor="@color/apple_text_primary"
+                    android:textSize="15sp" />
+
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+</FrameLayout>

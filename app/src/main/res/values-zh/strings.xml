@@ -3,6 +3,7 @@
     <string name="app_name">LiteTV</string>
     <string name="channel_list">频道列表</string>
     <string name="settings">设置</string>
+    <string name="settings_overlay_hint">调整这些设置时，画面会继续播放。</string>
     <string name="web_server">Web 服务器</string>
     <string name="play_source">播放源</string>
     <string name="epg_source">EPG 节目单源</string>

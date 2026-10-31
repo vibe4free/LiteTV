@@ -54,11 +54,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".ui.SettingsActivity"
-            android:exported="false"
-            android:screenOrientation="landscape" />
-
         <!--
             Shares the downloaded APK with the system installer. The installer is a different app, so
             a file:// URI would be rejected on Android 7+ (FileUriExposedException) and the download

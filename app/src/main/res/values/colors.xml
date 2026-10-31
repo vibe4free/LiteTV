@@ -16,4 +16,22 @@
     <color name="next_program_text">#999999</color>
     <color name="bg_overlay_start">#CC000000</color>
     <color name="bg_overlay_end">#66000000</color>
+
+    <!--
+        The settings panel follows the Apple TV look: a black ground, one accent colour, and
+        greys for everything that is not the accent. The panel itself is nearly opaque so the
+        picture beside it stays the brighter thing on the screen.
+    -->
+    <!--
+        Fully opaque on purpose. A translucent panel leaves the window "transparent" there, and
+        the television then punches the video layer through it: the panel is drawn but never
+        reaches the screen. The picture stays visible on the left third, which is the point.
+    -->
+    <color name="apple_panel_bg">#FF000000</color>
+    <color name="apple_row_focus">#26FF6B35</color>
+    <color name="apple_border">#2A2A2E</color>
+    <color name="apple_pill_pressed">#1AFFFFFF</color>
+    <color name="apple_section_title">#FF8A8A8E</color>
+    <color name="apple_text_primary">#FFF8FAFC</color>
+    <color name="apple_text_secondary">#FF94A3B8</color>
 </resources>

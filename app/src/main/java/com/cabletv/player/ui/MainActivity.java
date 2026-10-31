@@ -30,6 +30,8 @@ import xyz.doikki.videoplayer.exo.ExoMediaPlayerFactory;
 
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
+    /** The request code the settings panel uses for the system document picker. */
+    private static final int REQUEST_PICK_M3U_FILE = 1001;
 
     private VideoView mVideoView;
     private ChannelRepository mChannelRepository;
@@ -40,6 +42,8 @@ public class MainActivity extends Activity {
     private PlaybackStatusView mPlaybackStatusView;
     private ChannelNumberView mChannelNumberView;
     private TimeShiftBarComponent mTimeShiftBar;
+    /** The settings, as a panel that slides in over the picture. */
+    private SettingsPanel mSettingsPanel;
     private GestureDetector mGestureDetector;
 
     // Tap and double-tap bookkeeping for the touch handler above.
@@ -198,6 +202,30 @@ public class MainActivity extends Activity {
             }
         });
         rootView.addView(mTimeShiftBar, mTimeShiftBar.createBottomLayoutParams());
+
+        // The settings slide in from the right over the picture, which keeps playing behind them.
+        mSettingsPanel = new SettingsPanel(this, new SettingsPanel.Host() {
+            @Override
+            public void startFilePicker(Intent intent) {
+                startActivityForResult(intent, REQUEST_PICK_M3U_FILE);
+            }
+
+            @Override
+            public void requestStoragePermission(String[] permissions, int requestCode) {
+                requestPermissions(permissions, requestCode);
+            }
+
+            @Override
+            public void openSystemScreen(Intent intent) {
+                startActivity(intent);
+            }
+
+            @Override
+            public void onConfigurationChanged() {
+                applyConfigurationChanges();
+            }
+        });
+        rootView.addView(mSettingsPanel, mSettingsPanel.createPanelLayoutParams());
 
         // Phone/touch: tap video to show controls, double-tap to cycle sources, long-press
         // to replay the current programme, vertical fling to change channel, horizontal
@@ -372,6 +400,24 @@ public class MainActivity extends Activity {
 
     public boolean dispatchKeyEvent(KeyEvent event) {
         KeyMapping.Action action = KeyMapping.resolve(event.getKeyCode());
+        // While the settings panel is open it owns the remote: the arrow keys move the focus
+        // between its controls instead of changing channels, and OK presses the focused control.
+        // Only the menu and the back key still belong to the player.
+        if (mSettingsPanel != null && mSettingsPanel.isPanelVisible() && action != null) {
+            if (action == KeyMapping.Action.MENU) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    handleMenu();
+                }
+                return true;
+            }
+            if (action == KeyMapping.Action.BACK) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    handleBack();
+                }
+                return true;
+            }
+            return super.dispatchKeyEvent(event);
+        }
         if (action == null) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 Log.d(TAG, "No action mapped for keycode: " + event.getKeyCode());
@@ -1423,11 +1469,35 @@ public class MainActivity extends Activity {
                 android.view.ViewConfiguration.getDoubleTapTimeout() + 10);
     }
 
+    /**
+     * MENU opens the settings as a panel over the picture.
+     *
+     * <p>When the programme list is open, the first press folds the list away and stops there:
+     * closing the list and sliding in the panel in one go is jarring, and the viewer who meant
+     * to leave the list would find the settings in the way. A second press opens the panel.
+     */
     private void handleMenu() {
-        startActivity(new Intent(this, SettingsActivity.class));
+        if (mChannelListVisible) {
+            hideChannelList();
+            mChannelListVisible = false;
+            return;
+        }
+        if (mSettingsPanel == null) {
+            return;
+        }
+        if (mSettingsPanel.isPanelVisible()) {
+            mSettingsPanel.hidePanel();
+        } else {
+            mSettingsPanel.showPanel();
+        }
     }
 
     private void handleBack() {
+        if (mSettingsPanel != null && mSettingsPanel.isPanelVisible()) {
+            // The panel is a layer over the player, so BACK takes it off before anything else.
+            mSettingsPanel.hidePanel();
+            return;
+        }
         if (isNumberInputActive()) {
             // BACK abandons a half-typed channel number instead of leaving the app.
             cancelNumberInput();
@@ -1617,13 +1687,43 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (mSettingsPanel != null) {
+            mSettingsPanel.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (mSettingsPanel != null) {
+            mSettingsPanel.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        applyConfigurationChanges();
+        if (mVideoView != null) {
+            mVideoView.resume();
+        }
+    }
+
+    /**
+     * Reloads whatever the settings changed.
+     *
+     * <p>Called when the player comes back to the front and when the settings panel saves
+     * something: the panel sits inside the player, so the player is never resumed and would
+     * otherwise keep playing the old playlist.
+     */
+    private void applyConfigurationChanges() {
         String m3uSignature = m3uConfigSignature();
         if (!m3uSignature.equals(mLastM3uConfigSignature)) {
             mLastM3uConfigSignature = m3uSignature;
             if (mChannelRepository != null) {
-                Log.d(TAG, "M3U source changed in settings screen, reloading channels");
+                Log.d(TAG, "M3U source changed in the settings, reloading channels");
                 mChannelRepository.reload();
             }
         }
@@ -1631,12 +1731,9 @@ public class MainActivity extends Activity {
         if (!signature.equals(mLastEpgConfigSignature)) {
             mLastEpgConfigSignature = signature;
             if (mEpgManager != null) {
-                Log.d(TAG, "EPG settings changed in settings screen, reloading");
+                Log.d(TAG, "EPG settings changed in the settings, reloading");
                 mEpgManager.onEpgSourceChanged();
             }
-        }
-        if (mVideoView != null) {
-            mVideoView.resume();
         }
     }
 
