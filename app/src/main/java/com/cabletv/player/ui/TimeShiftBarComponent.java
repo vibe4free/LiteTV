@@ -16,6 +16,7 @@ import com.cabletv.player.R;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -27,13 +28,16 @@ import java.util.Locale;
  * back to the live edge.
  */
 public class TimeShiftBarComponent extends FrameLayout {
-    private static final int BAR_HEIGHT_DP = 92;
+    private static final int BAR_HEIGHT_DP = 116;
 
     private final TextView mChannelLabel;
     private final TextView mBackToLive;
     private final TextView mWindowLabel;
     private final TextView mTargetLabel;
     private final TextView mRateLabel;
+    private final TextView mProgramTitle;
+    private final TextView mBehindLiveLabel;
+    private final ProgramTimelineView mTimeline;
     private final SeekBar mSeekBar;
     private OnSeekListener mSeekListener;
     private static final long AUTO_HIDE_MS = 6_000;
@@ -97,6 +101,15 @@ public class TimeShiftBarComponent extends FrameLayout {
                 dp2px(56), dp2px(22), Gravity.CENTER_VERTICAL | Gravity.END);
         addView(mRateLabel, rateLp);
 
+        // The programme timeline is drawn under the seek bar's own track: the bar keeps the
+        // thumb and the drag, the timeline explains what the thumb is pointing at.
+        mTimeline = new ProgramTimelineView(context);
+        FrameLayout.LayoutParams timelineLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, dp2px(24));
+        timelineLp.gravity = Gravity.CENTER_VERTICAL | Gravity.TOP;
+        timelineLp.topMargin = dp2px(22);
+        addView(mTimeline, timelineLp);
+
         mSeekBar = new SeekBar(context);
         mSeekBar.setMax(1000);
         mSeekBar.setProgress(0);
@@ -104,6 +117,29 @@ public class TimeShiftBarComponent extends FrameLayout {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 dp2px(34),
                 Gravity.CENTER_VERTICAL | Gravity.TOP));
+
+        // The programme that is playing, named under the track.
+        mProgramTitle = new TextView(context);
+        mProgramTitle.setTextColor(0xFFFFFFFF);
+        mProgramTitle.setTextSize(14);
+        mProgramTitle.setMaxLines(1);
+        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        titleLp.gravity = Gravity.BOTTOM | Gravity.START;
+        titleLp.bottomMargin = dp2px(38);
+        addView(mProgramTitle, titleLp);
+
+        // How far behind the live edge the playhead is.
+        mBehindLiveLabel = new TextView(context);
+        mBehindLiveLabel.setTextColor(0xFF94A3B8);
+        mBehindLiveLabel.setTextSize(11);
+        FrameLayout.LayoutParams behindLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        behindLp.gravity = Gravity.BOTTOM | Gravity.END;
+        behindLp.bottomMargin = dp2px(38);
+        addView(mBehindLiveLabel, behindLp);
 
         mWindowLabel = new TextView(context);
         mWindowLabel.setTextColor(0xFFB0B8C4);
@@ -237,7 +273,55 @@ public class TimeShiftBarComponent extends FrameLayout {
         mWindowEndMs = Math.max(windowStartMs + 1000, windowEndMs);
         mPositionMs = Math.max(windowStartMs, Math.min(mWindowEndMs, positionMs));
         mSeekBar.setProgress(progressFor(mPositionMs));
+        mTimeline.setWindow(mWindowStartMs, mWindowEndMs, mPositionMs);
         updateLabels();
+    }
+
+    /**
+     * The programmes the timeline draws, taken from the guide.
+     *
+     * <p>Without a guide the track stays empty; the bar keeps working exactly as before.
+     */
+    public void setPrograms(List<ProgramTimelineView.Segment> segments) {
+        mTimeline.setSegments(segments);
+        updateProgramTitle();
+    }
+
+    /** Marks the right end of the track as the live edge. */
+    public void setLiveEdgeVisible(boolean visible) {
+        mTimeline.setLiveEdgeVisible(visible);
+    }
+
+    /** The programme under the playhead, named above the track. */
+    private void updateProgramTitle() {
+        String title = null;
+        for (ProgramTimelineView.Segment segment : mTimeline.getSegments()) {
+            if (mPositionMs >= segment.startTime && mPositionMs < segment.endTime) {
+                title = segment.title;
+                break;
+            }
+        }
+        if (title == null || title.isEmpty()) {
+            mProgramTitle.setVisibility(GONE);
+            return;
+        }
+        mProgramTitle.setVisibility(VISIBLE);
+        mProgramTitle.setText(title);
+    }
+
+    /** How far behind the live edge the playhead is, in the compact form "1:23:45". */
+    static String formatBehind(long behindMs) {
+        if (behindMs <= 0) {
+            return "0:00";
+        }
+        long total = behindMs / 1000;
+        long hours = total / 3600;
+        long minutes = (total % 3600) / 60;
+        long seconds = total % 60;
+        if (hours > 0) {
+            return String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds);
+        }
+        return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds);
     }
 
     public void setChannelLabel(String label) {
@@ -264,6 +348,17 @@ public class TimeShiftBarComponent extends FrameLayout {
         mWindowLabel.setText(getContext().getString(R.string.timeshift_window,
                 timeFmt.format(new Date(mWindowStartMs)),
                 timeFmt.format(new Date(mWindowEndMs))));
+        mTimeline.setPosition(mPositionMs);
+        updateProgramTitle();
+        // The distance to the live edge is what the viewer wants to know while rewinding.
+        long behind = mWindowEndMs - mPositionMs;
+        if (behind > 1000) {
+            mBehindLiveLabel.setVisibility(VISIBLE);
+            mBehindLiveLabel.setText(getContext().getString(R.string.timeshift_behind_live,
+                    formatBehind(behind)));
+        } else {
+            mBehindLiveLabel.setVisibility(GONE);
+        }
     }
 
     /** Keep the thumb advancing with real time while watching live (only when idle). */

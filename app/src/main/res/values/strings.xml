@@ -104,6 +104,7 @@
     <string name="source_switched">%1$s · source %2$d of %3$d</string>
     <string name="source_only_one">This channel has a single source</string>
     <string name="timeshift_position">Position %1$s</string>
+    <string name="timeshift_behind_live">Behind live %1$s</string>
     <string name="timeshift_window">%1$s – %2$s</string>
     <string name="back_to_live">◉ Live</string>
 

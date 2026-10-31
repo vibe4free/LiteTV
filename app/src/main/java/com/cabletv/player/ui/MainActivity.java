@@ -28,6 +28,9 @@ import com.cabletv.player.util.CatchupUrlBuilder;
 import xyz.doikki.videoplayer.player.VideoView;
 import xyz.doikki.videoplayer.exo.ExoMediaPlayerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
     /** The request code the settings panel uses for the system document picker. */
@@ -661,6 +664,7 @@ public class MainActivity extends Activity {
             mTimeShiftBar.setChannelLabel(channel.name);
             mTimeShiftBar.setBackToLiveVisible(true);
             mTimeShiftBar.setWindow(mCatchupProgram.startTime, end, mCatchupPlayheadMs);
+            mTimeShiftBar.setPrograms(timelineSegments(channel, mCatchupProgram.startTime, end));
             mTimeShiftBar.show();
             startTimeShiftTicker();
             return;
@@ -674,10 +678,36 @@ public class MainActivity extends Activity {
         mTimeShiftBar.setChannelLabel(channel.name);
         mTimeShiftBar.setBackToLiveVisible(false);
         mTimeShiftBar.setWindow(start, now, now);
+        mTimeShiftBar.setPrograms(timelineSegments(channel, start, now));
+        // The right end of the live window is where the viewer has to return to.
+        mTimeShiftBar.setLiveEdgeVisible(true);
         if (forceShow) {
             mTimeShiftBar.show();
             startTimeShiftTicker();
         }
+    }
+
+    /**
+     * The guide's programmes that fall inside the time-shift window, as timeline segments.
+     *
+     * <p>Only the parts inside the window are drawn, so the track shows what the viewer can
+     * actually reach with the thumb.
+     */
+    private List<ProgramTimelineView.Segment> timelineSegments(Channel channel, long fromMs,
+            long toMs) {
+        List<ProgramTimelineView.Segment> segments = new ArrayList<>();
+        List<EpgManager.Program> programs = mEpgManager.getAllPrograms(channel);
+        if (programs == null || programs.isEmpty()) {
+            return segments;
+        }
+        for (EpgManager.Program program : programs) {
+            if (program == null || program.endTime <= fromMs || program.startTime >= toMs) {
+                continue;
+            }
+            segments.add(new ProgramTimelineView.Segment(program.title,
+                    Math.max(program.startTime, fromMs), Math.min(program.endTime, toMs)));
+        }
+        return segments;
     }
 
     private void stopTimeShiftTicker() {
