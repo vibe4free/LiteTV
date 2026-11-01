@@ -35,6 +35,8 @@ public class MainActivity extends Activity {
     private static final String TAG = "MainActivity";
     /** The request code the settings panel uses for the system document picker. */
     private static final int REQUEST_PICK_M3U_FILE = 1001;
+    /** Left inset the playback strip needs while the replay badge is on screen. */
+    private static final int BADGE_INSET_DP = 52;
 
     private VideoView mVideoView;
     private ChannelRepository mChannelRepository;
@@ -47,6 +49,8 @@ public class MainActivity extends Activity {
     private TimeShiftBarComponent mTimeShiftBar;
     /** The settings, as a panel that slides in over the picture. */
     private SettingsPanel mSettingsPanel;
+    /** The corner mark that says "this is a replay, not live TV". */
+    private android.widget.ImageView mCatchupBadge;
     private GestureDetector mGestureDetector;
 
     // Tap and double-tap bookkeeping for the touch handler above.
@@ -83,15 +87,23 @@ public class MainActivity extends Activity {
     private int mCurrentUrlIndex = 0;
     private boolean mDestroyed = false;
 
-    /** Catchup (回看) playback: playing a time-shifted stream instead of live. */
-    private boolean mCatchupActive = false;
-    private Channel mCatchupChannel = null;
-    private EpgManager.Program mCatchupProgram = null;
-    /** The catchup playhead (programme start + accumulated seek offset), in epoch millis. */
-    private long mCatchupPlayheadMs = 0;
+    /** Everything about the replay that is running, cleared as one. */
+    private final CatchupState mCatchup = new CatchupState();
     private static final long CATCHUP_SEEK_STEP_MS = SeekKeyPolicy.STEP_MS;
     /** How far to rewind from "now" when live LEFT enters 回看 without EPG data. */
     private static final long CATCHUP_REWIND_MS = 2 * 60 * 1000L;
+    /**
+     * How far back a replay may reach. The window is not limited to the programme that is on
+     * air: stepping back past its start continues into the programme before it, which is what
+     * the viewer expects from a remote that keeps moving.
+     *
+     * <p>Three hours, not a whole day: the strip places the thumb inside this window, so a very
+     * long window makes one press look like a huge jump. Three hours holds several programmes
+     * and keeps the thumb roughly where it was when live playback handed over to the replay.
+     */
+    private static final long CATCHUP_MAX_REWIND_MS = 3 * 60 * 60 * 1000L;
+    /** How far back a replay reaches when the guide knows nothing about the channel. */
+    private static final long NO_GUIDE_LOOKBACK_MS = 2 * 60 * 60 * 1000L;
     /** How far past "now" a still-airing programme's window may extend before the server catches up. */
     private static final long CATCHUP_LIVE_TAIL_MS = 8 * 60 * 60 * 1000L;
     private final Runnable mCatchupSeekHideRunnable = this::hideCatchupSeekIndicator;
@@ -205,6 +217,20 @@ public class MainActivity extends Activity {
             }
         });
         rootView.addView(mTimeShiftBar, mTimeShiftBar.createBottomLayoutParams());
+
+        // The replay badge: a corner mark, so a paused viewer coming back to the television can
+        // tell a replay from live TV at a glance.
+        mCatchupBadge = new android.widget.ImageView(this);
+        mCatchupBadge.setImageResource(R.drawable.ic_replay_badge);
+        mCatchupBadge.setVisibility(View.GONE);
+        FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(dp2px(22), dp2px(22));
+        badgeLp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
+        badgeLp.leftMargin = dp2px(18);
+        badgeLp.setMarginStart(dp2px(18));
+        // In the bottom-left corner of the picture, inside the playback strip: the strip makes
+        // room for it by indenting its text, so nothing is covered.
+        badgeLp.bottomMargin = dp2px(10);
+        rootView.addView(mCatchupBadge, badgeLp);
 
         // The settings slide in from the right over the picture, which keeps playing behind them.
         mSettingsPanel = new SettingsPanel(this, new SettingsPanel.Host() {
@@ -388,6 +414,13 @@ public class MainActivity extends Activity {
                 mLastM3uConfigSignature = m3uConfigSignature();
                 mChannelRepository.reload();
             }
+
+            @Override
+            public void onDisplaySettingsChanged() {
+                Log.d(TAG, "Display settings changed from the web page");
+                // The web server answers on its own thread; views belong to the UI thread.
+                runOnUiThread(MainActivity.this::updateCatchupBadge);
+            }
         });
         if (AppConfig.isWebServerEnabled()) {
             ConfigWebServer.startServer(this);
@@ -414,6 +447,12 @@ public class MainActivity extends Activity {
                 return true;
             }
             if (action == KeyMapping.Action.BACK) {
+                if (SettingsPanel.backRouteFor(mSettingsPanel.isEditingText())
+                        == SettingsPanel.BackRoute.LEAVE_FIELD) {
+                    // Typing wins: BACK leaves the field (closing the keyboard and putting the row
+                    // back to "press OK to edit") instead of taking the whole panel away.
+                    return super.dispatchKeyEvent(event);
+                }
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     handleBack();
                 }
@@ -517,12 +556,7 @@ public class MainActivity extends Activity {
             mChannelListVisible = false;
         }
         // The new source is a live stream, so leave any 回看 window behind.
-        if (mCatchupActive) {
-            mCatchupActive = false;
-            mCatchupChannel = null;
-            mCatchupProgram = null;
-            mCatchupPlayheadMs = 0;
-        }
+        mCatchup.clear();
         cancelReconnect();
         runOnUiThread(() -> {
             mVideoView.switchUrl(url, channel.headers);
@@ -579,7 +613,7 @@ public class MainActivity extends Activity {
      */
     private void handleTimeShiftSeek(long targetMs) {
         long now = System.currentTimeMillis();
-        if (mCatchupActive) {
+        if (mCatchup.active) {
             seekCatchupTo(targetMs);
             return;
         }
@@ -599,21 +633,83 @@ public class MainActivity extends Activity {
     /** Rewinds straight from the live bar to the given time (回看 at that moment). */
     private void enterCatchupFromLive(Channel channel, long targetMs) {
         long now = System.currentTimeMillis();
+        // The window runs to the live edge plus a tail, so a replay can be wound forward again
+        // without another round trip, and it starts far enough back to hold the preceding
+        // programmes: stepping back past this programme's start must keep going.
         long end = now + CATCHUP_LIVE_TAIL_MS;
-        EpgManager.Program program = null;
-        if (targetMs >= timeShiftWindowStart(channel)) {
-            EpgManager.Program current = mEpgManager.getCurrentProgram(channel);
-            if (current != null && targetMs >= current.startTime) {
-                program = current;
-                // Past programmes end at their stop time; only still-airing ones keep a tail.
-                end = catchupWindowEnd(program, now);
-            }
-        }
+        long start = catchupWindowStart(channel, targetMs);
+        EpgManager.Program program = programAt(channel, targetMs);
         if (program == null) {
-            // No EPG: replay a fixed window from the drop point.
+            // No guide: replay a fixed window from the drop point.
             program = new EpgManager.Program(channel.name, targetMs, end);
         }
-        startCatchup(channel, targetMs, end, program);
+        startCatchup(channel, targetMs, start, end, program);
+    }
+
+    /**
+     * The left edge of a replay window: back to the earliest programme the guide still holds,
+     * within a fixed limit.
+     *
+     * <p>Deliberately not the start of the programme on air: that made the rewind stop dead at
+     * the programme boundary, and the viewer stepping back had no way to reach what aired
+     * before it.
+     */
+    private long catchupWindowStart(Channel channel, long targetMs) {
+        return catchupWindowStart(mEpgManager.getAllPrograms(channel), targetMs,
+                CATCHUP_MAX_REWIND_MS);
+    }
+
+    /**
+     * The left edge of a replay window, from the guide's programmes.
+     *
+     * <p>Package-visible and free of Android types so the boundaries can be pinned down by
+     * tests: this is what decides whether stepping back past a programme's start keeps going.
+     *
+     * @param programs the guide's programmes for the channel, in any order
+     * @param targetMs where the playhead is about to land
+     * @param now      the current time
+     * @param maxRewindMs how far back the window may reach at most
+     */
+    static long catchupWindowStart(List<EpgManager.Program> programs, long targetMs,
+            long maxRewindMs) {
+        // Anchored on the playhead, not on the clock. Picking a programme from the guide is an
+        // explicit request for that moment; measuring the limit back from "now" pushed the window
+        // past it, so the thumb stuck to the left edge and the strip named whatever aired later
+        // until the viewer nudged it forward.
+        long limit = targetMs - maxRewindMs;
+        long earliest = targetMs;
+        boolean found = false;
+        if (programs != null) {
+            for (EpgManager.Program program : programs) {
+                if (program == null || program.endTime <= limit) {
+                    continue;
+                }
+                if (program.startTime > 0 && program.startTime < earliest) {
+                    earliest = program.startTime;
+                    found = true;
+                }
+            }
+        }
+        if (!found) {
+            // No guide data before the playhead: keep a sensible span rather than a zero-width one.
+            earliest = targetMs - NO_GUIDE_LOOKBACK_MS;
+        }
+        // Never start after the playhead: the window has to contain it.
+        return Math.min(earliest, targetMs);
+    }
+
+    /** The programme covering a moment, or null when the guide does not reach that far. */
+    private EpgManager.Program programAt(Channel channel, long timeMs) {
+        List<EpgManager.Program> programs = mEpgManager.getAllPrograms(channel);
+        if (programs == null) {
+            return null;
+        }
+        for (EpgManager.Program program : programs) {
+            if (program != null && timeMs >= program.startTime && timeMs < program.endTime) {
+                return program;
+            }
+        }
+        return null;
     }
 
     /** The left edge of the live time-shift window: today's programme or a fixed lookback. */
@@ -645,11 +741,56 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * A replay in progress: which channel, where the playhead is, and how far the strip reaches.
+     *
+     * <p>One object rather than six parallel fields, so leaving a replay is a single
+     * {@link #clear()} and cannot leave a stale window behind for the next one.
+     */
+    private static final class CatchupState {
+        boolean active;
+        Channel channel;
+        EpgManager.Program program;
+        /** Programme start plus the accumulated seek offset, in epoch millis. */
+        long playheadMs;
+        /** The span of the replay window; it can cover several programmes. */
+        long windowStartMs;
+        long windowEndMs;
+
+        void clear() {
+            active = false;
+            channel = null;
+            program = null;
+            playheadMs = 0;
+            windowStartMs = 0;
+            windowEndMs = 0;
+        }
+    }
+
+    /**
+     * Shows the replay badge exactly while a replay is running and the viewer has not switched
+     * the mark off.
+     */
+    private void updateCatchupBadge() {
+        if (mCatchupBadge == null) {
+            return;
+        }
+        boolean show = mCatchup.active && AppConfig.isCatchupBadgeEnabled();
+        mCatchupBadge.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (mPlaybackInfoComponent != null) {
+            // The strip makes room for the badge instead of being covered by it.
+            mPlaybackInfoComponent.setLeadingInsetDp(show ? BADGE_INSET_DP : 16);
+        }
+    }
+
+    /**
+     * Repaints the time-shift bar for the current playback position.
+     *
      * @param forceShow live mode only: the bar normally stays hidden until the user taps the
      *                  video, so it never sits over TV playback uninvited. Catchup always shows
      *                  it because the drag IS the way to seek a replay.
      */
     private void refreshTimeShiftBar(boolean forceShow) {
+        updateCatchupBadge();
         if (mTimeShiftBar == null) {
             return;
         }
@@ -659,12 +800,23 @@ public class MainActivity extends Activity {
             return;
         }
         long now = System.currentTimeMillis();
-        if (mCatchupActive && mCatchupProgram != null) {
-            long end = catchupWindowEnd(mCatchupProgram, now);
+        if (mCatchup.active && mCatchup.program != null) {
+            // The strip shows the whole replay window, not just the programme under the
+            // playhead: that is what makes stepping into the neighbouring programme visible.
+            long start = mCatchup.windowStartMs > 0
+                    ? Math.min(mCatchup.windowStartMs, mCatchup.playheadMs)
+                    : mCatchup.program.startTime;
+            // The strip ends at "now", the same edge live playback ends at. The eight hour tail
+            // in the playseek URL is about keeping the stream flowing, not about the window the
+            // viewer is looking at -- including it here made the thumb jump to the middle of the
+            // screen the moment a replay started.
+            long end = Math.max(now, mCatchup.playheadMs);
             mTimeShiftBar.setChannelLabel(channel.name);
             mTimeShiftBar.setBackToLiveVisible(true);
-            mTimeShiftBar.setWindow(mCatchupProgram.startTime, end, mCatchupPlayheadMs);
-            mTimeShiftBar.setPrograms(timelineSegments(channel, mCatchupProgram.startTime, end));
+            mTimeShiftBar.setWindow(start, end, mCatchup.playheadMs);
+            mTimeShiftBar.setPrograms(timelineSegments(channel, start, end));
+            // A replay does not follow the broadcast, so the ticker must not move the playhead.
+            mTimeShiftBar.setLiveMode(false, now);
             mTimeShiftBar.show();
             startTimeShiftTicker();
             return;
@@ -679,8 +831,8 @@ public class MainActivity extends Activity {
         mTimeShiftBar.setBackToLiveVisible(false);
         mTimeShiftBar.setWindow(start, now, now);
         mTimeShiftBar.setPrograms(timelineSegments(channel, start, now));
-        // The right end of the live window is where the viewer has to return to.
-        mTimeShiftBar.setLiveEdgeVisible(true);
+        // Watching live: the playhead follows the broadcast and the right end is the live edge.
+        mTimeShiftBar.setLiveMode(true, now);
         if (forceShow) {
             mTimeShiftBar.show();
             startTimeShiftTicker();
@@ -704,8 +856,11 @@ public class MainActivity extends Activity {
             if (program == null || program.endTime <= fromMs || program.startTime >= toMs) {
                 continue;
             }
+            // The programme's own boundaries, not clipped to the window: clipping here made the
+            // current block shrink every time the window end moved, which read as the progress
+            // bar changing length while nothing had changed.
             segments.add(new ProgramTimelineView.Segment(program.title,
-                    Math.max(program.startTime, fromMs), Math.min(program.endTime, toMs)));
+                    program.startTime, program.endTime));
         }
         return segments;
     }
@@ -750,8 +905,8 @@ public class MainActivity extends Activity {
      * meaning: switching columns in the list, paging the guide by a day.
      */
     private boolean seekKeysApply() {
-        boolean barVisible = mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE;
-        return SeekKeyPolicy.applies(mCatchupActive, barVisible);
+        // The open list owns the horizontal keys; full screen they belong to the playhead.
+        return SeekKeyPolicy.appliesOnScreen(mChannelListVisible);
     }
 
     /**
@@ -769,7 +924,11 @@ public class MainActivity extends Activity {
         }
         switch (event.getAction()) {
             case KeyEvent.ACTION_DOWN:
-                if (event.getRepeatCount() == 0) {
+                if (!mSeekPressActive) {
+                    // A new press. Everything that describes "this hold" is reset here and only
+                    // here: a repeated down event must never restart the clock, or a remote (or a
+                    // synthetic key source) that reports its repeats with a zero repeat count
+                    // would keep postponing the hold and the seek would never accelerate.
                     mSeekPressActive = true;
                     mSeekLongPressFired = false;
                     mSeekAccumulatedMs = 0;
@@ -785,14 +944,9 @@ public class MainActivity extends Activity {
                     // once would each count the same elapsed time and double the distance.
                     mMainHandler.removeCallbacks(mSeekLongPressRunnable);
                     mMainHandler.postDelayed(mSeekLongPressRunnable, mSeekLongPressMs);
-                } else if (event.isLongPress()) {
-                    // Some remotes report the long press on the first down; the direction has to
-                    // be known even then, or the release would seek nowhere.
-                    if (!mSeekPressActive) {
-                        mSeekPressActive = true;
-                        mSeekDirection = action == KeyMapping.Action.LEFT ? -1 : 1;
-                        mSeekPressAtMs = android.os.SystemClock.uptimeMillis();
-                    }
+                } else if (event.getRepeatCount() > 0 || event.isLongPress()) {
+                    // Still the same press: this is the keyboard repeating, so the key is being
+                    // held. The timer above is on its way anyway; whichever arrives first wins.
                     startSeekAcceleration();
                 }
                 return true;
@@ -812,9 +966,12 @@ public class MainActivity extends Activity {
                         || android.os.SystemClock.uptimeMillis() - mSeekPressAtMs >= mSeekLongPressMs;
                 if (heldLong) {
                     // A hold always moves at least one step, even when it was too brief for the
-                    // accelerated distance to add up to anything.
-                    long distance = Math.max(mSeekAccumulatedMs,
-                            (long) mSeekDirection * CATCHUP_SEEK_STEP_MS);
+                    // accelerated distance to add up to anything. The comparison has to follow the
+                    // direction: Math.max would pick the smaller magnitude on a rewind and drop
+                    // everything the hold had accumulated.
+                    long distance = SeekKeyPolicy.holdDistance(mSeekAccumulatedMs,
+                            CATCHUP_SEEK_STEP_MS, mSeekDirection);
+                    Log.i(TAG, "Held seek: " + (distance / 1000) + "s");
                     applySeekOffset(distance);
                     mSeekAccumulatedMs = 0;
                 } else {
@@ -822,7 +979,7 @@ public class MainActivity extends Activity {
                 }
                 mSeekLongPressFired = false;
                 if (mTimeShiftBar != null) {
-                    mTimeShiftBar.hideSeekRate();
+                    mTimeShiftBar.endSeeking();
                 }
                 return true;
             default:
@@ -885,7 +1042,7 @@ public class MainActivity extends Activity {
         if (deltaMs == 0) {
             return;
         }
-        if (mCatchupActive) {
+        if (mCatchup.active) {
             seekCatchup(deltaMs);
             return;
         }
@@ -977,7 +1134,8 @@ public class MainActivity extends Activity {
         if (start >= now) {
             start = now - CATCHUP_SEEK_STEP_MS; // never ask for a window that starts in the future
         }
-        startCatchup(channel, start, catchupWindowEnd(program, now), program);
+        startCatchup(channel, start, catchupWindowStart(channel, start),
+                now + CATCHUP_LIVE_TAIL_MS, program);
     }
 
     /**
@@ -998,12 +1156,14 @@ public class MainActivity extends Activity {
         long now = System.currentTimeMillis();
         EpgManager.Program synthetic = new EpgManager.Program(
                 channel.name, now - CATCHUP_REWIND_MS, now + CATCHUP_LIVE_TAIL_MS);
-        startCatchup(channel, synthetic.startTime, synthetic.endTime, synthetic);
+        startCatchup(channel, synthetic.startTime, synthetic.startTime, synthetic.endTime,
+                synthetic);
     }
 
     /** Common catchup start: build the playseek URL, arm the state, switch the player. */
-    private void startCatchup(Channel channel, long startMs, long endMs, EpgManager.Program program) {
-        String url = CatchupUrlBuilder.buildUrl(channel, startMs, endMs);
+    private void startCatchup(Channel channel, long playheadMs, long windowStartMs, long windowEndMs,
+            EpgManager.Program program) {
+        String url = CatchupUrlBuilder.buildUrl(channel, playheadMs, windowEndMs);
         if (url == null) {
             android.widget.Toast.makeText(this, R.string.catchup_not_available,
                     android.widget.Toast.LENGTH_SHORT).show();
@@ -1011,10 +1171,13 @@ public class MainActivity extends Activity {
         }
 
         cancelReconnect();
-        mCatchupActive = true;
-        mCatchupChannel = channel;
-        mCatchupProgram = program;
-        mCatchupPlayheadMs = startMs;
+        mCatchup.active = true;
+        mCatchup.channel = channel;
+        mCatchup.program = program;
+        mCatchup.playheadMs = playheadMs;
+        // The strip draws the playhead inside this span, so it must contain it by construction.
+        mCatchup.windowStartMs = Math.min(windowStartMs, playheadMs);
+        mCatchup.windowEndMs = Math.max(windowEndMs, playheadMs);
         mCurrentUrlIndex = 0;
         // The guide now belongs to the replayed programme, not to whatever airs now.
         syncGuideFocusTime();
@@ -1041,52 +1204,53 @@ public class MainActivity extends Activity {
         mEpgManager.loadEpg(channel);
     }
 
-    /** The end of the playseek window: a past programme ends at its stop time, a live one in the
-     *  near future so the stream keeps flowing once it catches up. */
-    private long catchupWindowEnd(EpgManager.Program program, long now) {
-        return program.endTime > now ? now + CATCHUP_LIVE_TAIL_MS : program.endTime;
-    }
-
     /** Rewinds or fast-forwards the catchup playhead by rebuilding the playseek window. */
     private void seekCatchup(long deltaMs) {
-        if (!mCatchupActive || mCatchupChannel == null || mCatchupProgram == null) {
+        if (!mCatchup.active || mCatchup.channel == null || mCatchup.program == null) {
             return;
         }
         long now = System.currentTimeMillis();
-        long target = Math.max(mCatchupProgram.startTime,
-                Math.min(now - CATCHUP_SEEK_STEP_MS, mCatchupPlayheadMs + deltaMs));
+        long target = Math.max(mCatchup.windowStartMs,
+                Math.min(now - CATCHUP_SEEK_STEP_MS, mCatchup.playheadMs + deltaMs));
         seekCatchupTo(target);
     }
 
     /** Seeks the catchup playhead to an absolute position within the programme window. */
     private void seekCatchupTo(long targetMs) {
-        if (!mCatchupActive || mCatchupChannel == null || mCatchupProgram == null) {
+        if (!mCatchup.active || mCatchup.channel == null || mCatchup.program == null) {
             return;
         }
         long now = System.currentTimeMillis();
-        long minPlayhead = mCatchupProgram.startTime;
+        long minPlayhead = mCatchup.windowStartMs > 0 ? mCatchup.windowStartMs
+                : mCatchup.program.startTime;
         long maxPlayhead = now - CATCHUP_SEEK_STEP_MS;
         long target = Math.max(minPlayhead, Math.min(targetMs, maxPlayhead));
-        if (target == mCatchupPlayheadMs) {
+        if (target == mCatchup.playheadMs) {
             return;
         }
-        mCatchupPlayheadMs = target;
-        String url = CatchupUrlBuilder.buildUrl(mCatchupChannel, mCatchupPlayheadMs,
-                catchupWindowEnd(mCatchupProgram, now));
+        mCatchup.playheadMs = target;
+        // Stepping into the programme next door makes that one the replay being watched, so the
+        // name on screen and the guide focus follow the playhead.
+        EpgManager.Program covering = programAt(mCatchup.channel, target);
+        if (covering != null) {
+            mCatchup.program = covering;
+        }
+        String url = CatchupUrlBuilder.buildUrl(mCatchup.channel, target,
+                Math.max(mCatchup.windowEndMs, now + CATCHUP_LIVE_TAIL_MS));
         if (url == null) {
             return;
         }
-        Log.i(TAG, "Catchup seek to +" + ((mCatchupPlayheadMs - mCatchupProgram.startTime) / 1000) + "s");
+        Log.i(TAG, "Catchup seek to +" + ((mCatchup.playheadMs - mCatchup.program.startTime) / 1000) + "s");
         runOnUiThread(() -> {
-            mVideoView.switchUrl(url, mCatchupChannel.headers);
+            mVideoView.switchUrl(url, mCatchup.channel.headers);
             refreshTimeShiftBar();
         });
-        showCatchupSeekIndicator((mCatchupPlayheadMs - mCatchupProgram.startTime) / 1000);
+        showCatchupSeekIndicator((mCatchup.playheadMs - mCatchup.program.startTime) / 1000);
     }
 
     private void showCatchupSeekIndicator(long offsetSec) {
         String label = (offsetSec >= 0 ? "+" : "-") + Math.abs(offsetSec) + "s";
-        mChannelNumberView.showDigits(label, mCatchupChannel.name);
+        mChannelNumberView.showDigits(label, mCatchup.channel.name);
         mMainHandler.removeCallbacks(mCatchupSeekHideRunnable);
         mMainHandler.postDelayed(mCatchupSeekHideRunnable, 1500);
     }
@@ -1099,16 +1263,18 @@ public class MainActivity extends Activity {
 
     /** Leaves catchup and returns to the live stream of the channel being watched. */
     private void exitCatchupToLive() {
-        if (!mCatchupActive) {
+        exitCatchupToLive(R.string.catchup_exited);
+    }
+
+    /** @param messageRes what to tell the viewer about why the replay stopped */
+    private void exitCatchupToLive(int messageRes) {
+        if (!mCatchup.active) {
             return;
         }
         Log.i(TAG, "Exiting catchup, returning to live");
-        mCatchupActive = false;
-        mCatchupChannel = null;
-        mCatchupProgram = null;
-        mCatchupPlayheadMs = 0;
+        mCatchup.clear();
         syncGuideFocusTime();
-        android.widget.Toast.makeText(this, R.string.catchup_exited,
+        android.widget.Toast.makeText(this, messageRes,
                 android.widget.Toast.LENGTH_SHORT).show();
         playChannel(mCurrentChannelIndex);
     }
@@ -1283,18 +1449,8 @@ public class MainActivity extends Activity {
     /** Left steps back through the three columns: programmes, channels, groups. */
     private void handleFocusLeft() {
         if (!mChannelListVisible || mChannelListComponent == null) {
-            // Full-screen LEFT rewinds the catchup playhead; in live playback it enters 回看 so
-            // the viewer can rewind a programme they missed the start of.
-            if (mCatchupActive) {
-                seekCatchup(-CATCHUP_SEEK_STEP_MS);
-            } else {
-                enterCatchupFromLive();
-            }
-            return;
-        }
-        // While the time-shift bar is on screen the horizontal keys move the playhead, even with
-        // the list open: the viewer is adjusting the catchup position, not browsing the columns.
-        if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
+            // Full-screen LEFT moves the playhead back from where it is now; while watching live
+            // that also enters 回看. It is handled by the seek path, so this is only a fallback.
             applySeekOffset(-CATCHUP_SEEK_STEP_MS);
             return;
         }
@@ -1314,16 +1470,10 @@ public class MainActivity extends Activity {
 
     /** Right steps forward through the three columns: groups, channels, programmes. */
     private void handleFocusRight() {
-        // The time-shift bar owns the horizontal keys while it is on screen.
-        if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
-            applySeekOffset(CATCHUP_SEEK_STEP_MS);
-            return;
-        }
         if (!mChannelListVisible || mChannelListComponent == null) {
-            // Full-screen RIGHT fast-forwards the catchup playhead.
-            if (mCatchupActive) {
-                seekCatchup(CATCHUP_SEEK_STEP_MS);
-            }
+            // Full-screen RIGHT moves the playhead forward; nothing happens while watching live,
+            // where it is already at the live edge.
+            applySeekOffset(CATCHUP_SEEK_STEP_MS);
             return;
         }
         switch (mChannelListComponent.getFocusPanel()) {
@@ -1390,8 +1540,8 @@ public class MainActivity extends Activity {
         if (mChannelListComponent == null) {
             return;
         }
-        long focusTime = (mCatchupActive && mCatchupProgram != null)
-                ? mCatchupProgram.startTime : System.currentTimeMillis();
+        long focusTime = (mCatchup.active && mCatchup.program != null)
+                ? mCatchup.program.startTime : System.currentTimeMillis();
         mChannelListComponent.setProgramFocusTime(focusTime);
     }
 
@@ -1540,7 +1690,7 @@ public class MainActivity extends Activity {
         } else if (mChannelListVisible) {
             hideChannelList();
             mChannelListVisible = false;
-        } else if (mCatchupActive) {
+        } else if (mCatchup.active) {
             exitCatchupToLive();
         } else {
             showExitConfirmDialog();
@@ -1567,10 +1717,7 @@ public class MainActivity extends Activity {
     private void playChannel(int index) {
         Log.d(TAG, "playChannel called with index: " + index);
         // Switching channels (or returning to live) always leaves catchup.
-        mCatchupActive = false;
-        mCatchupChannel = null;
-        mCatchupProgram = null;
-        mCatchupPlayheadMs = 0;
+        mCatchup.clear();
         // A deliberate channel change cancels any pending reconnect for the previous channel
         cancelReconnect();
         Channel channel = mChannelRepository.getChannel(index);
@@ -1618,10 +1765,21 @@ public class MainActivity extends Activity {
                 }
                 break;
             case VideoView.STATE_ERROR:
+                if (mCatchup.active) {
+                    // The catchup server refused this moment (most operators only keep a limited
+                    // window). Say so: being dropped back to live with no explanation reads as
+                    // the remote having failed.
+                    Log.w(TAG, "Catchup failed, returning to live");
+                    exitCatchupToLive(R.string.catchup_unavailable);
+                    break;
+                }
+                if (!tryNextUrl()) {
+                    scheduleReconnect();
+                }
+                break;
             case VideoView.STATE_PLAYBACK_COMPLETED:
-                if (mCatchupActive) {
-                    // A catchup stream ended (a past programme finished) or broke: fall back to
-                    // the live channel instead of hammering the catchup server.
+                if (mCatchup.active) {
+                    // A past programme simply finished; nothing went wrong.
                     exitCatchupToLive();
                     break;
                 }
@@ -1765,6 +1923,9 @@ public class MainActivity extends Activity {
                 mEpgManager.onEpgSourceChanged();
             }
         }
+        // Display preferences have no signature of their own; the badge simply follows the
+        // setting every time the settings report a change.
+        updateCatchupBadge();
     }
 
     @Override

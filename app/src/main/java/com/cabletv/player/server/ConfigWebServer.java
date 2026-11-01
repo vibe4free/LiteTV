@@ -68,6 +68,9 @@ public class ConfigWebServer {
         void onEpgPreferenceChanged(String preference);
         /** The local playlist was cleared (newPath is empty) from the web page. */
         void onM3uFileChanged(String newPath);
+
+        /** A display preference changed; the picture has to follow without a restart. */
+        void onDisplaySettingsChanged();
     }
 
     /** Cleared by the Activity in onDestroy(); volatile because server threads read it. */
@@ -505,6 +508,7 @@ public class ConfigWebServer {
         // same configuration instead of each covering half of it.
         config.addProperty("epg_display_enabled", AppConfig.isEpgDisplayEnabled());
         config.addProperty("sidebar_opacity", AppConfig.getSidebarOpacity());
+        config.addProperty("catchup_badge", AppConfig.isCatchupBadgeEnabled());
         config.addProperty("video_render_mode",
                 AppConfig.getVideoRenderMode() == AppConfig.RENDER_TEXTURE ? "texture" : "surface");
         config.addProperty("video_decode_mode", decodeModeName(AppConfig.getVideoDecodeMode()));
@@ -670,7 +674,8 @@ public class ConfigWebServer {
             Map<String, String> params = parseFormData(body);
             String epgDisplay = params.get("epg_display_enabled");
             String opacity = params.get("sidebar_opacity");
-            if (!isValidFlag(epgDisplay) || !isValidOpacity(opacity)) {
+            String catchupBadge = params.get("catchup_badge");
+            if (!isValidFlag(epgDisplay) || !isValidOpacity(opacity) || !isValidFlag(catchupBadge)) {
                 return jsonResult(false, "Invalid display setting");
             }
             if (epgDisplay != null) {
@@ -678,6 +683,18 @@ public class ConfigWebServer {
             }
             if (opacity != null) {
                 AppConfig.setSidebarOpacity(Integer.parseInt(opacity));
+            }
+            if (catchupBadge != null) {
+                AppConfig.setCatchupBadgeEnabled("1".equals(catchupBadge));
+            }
+            OnConfigChangeListener listener = sConfigChangeListener;
+            if (listener != null) {
+                try {
+                    listener.onDisplaySettingsChanged();
+                } catch (RuntimeException e) {
+                    // The page's answer must not depend on the player being alive.
+                    Log.w(TAG, "Display change listener threw", e);
+                }
             }
             return jsonResult(true, "Display settings saved");
         } catch (Exception e) {
@@ -967,6 +984,11 @@ public class ConfigWebServer {
                 "                <option value=\"1\">显示</option>\n" +
                 "                <option value=\"0\">不显示</option>\n" +
                 "            </select>\n" +
+                "            <label for=\"catchupBadge\">回看时显示回放标记:</label>\n" +
+                "            <select id=\"catchupBadge\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
+                "                <option value=\"1\">显示（默认）</option>\n" +
+                "                <option value=\"0\">不显示</option>\n" +
+                "            </select>\n" +
                 "            <label for=\"sidebarOpacity\">频道列表背景:</label>\n" +
                 "            <select id=\"sidebarOpacity\" style=\"width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
                 "                <option value=\"0\">半透明（默认）</option>\n" +
@@ -1115,6 +1137,7 @@ public class ConfigWebServer {
                 "                + '&video_decode_mode=' + encodeURIComponent(document.getElementById('videoDecodeMode').value)\n" +
                 "                + '&video_tunneling=' + (document.getElementById('videoTunneling').checked ? '1' : '0')\n" +
                 "                + '&epg_display_enabled=' + encodeURIComponent(document.getElementById('epgDisplay').value)\n" +
+                "                + '&catchup_badge=' + encodeURIComponent(document.getElementById('catchupBadge').value)\n" +
                 "                + '&sidebar_opacity=' + encodeURIComponent(document.getElementById('sidebarOpacity').value);\n" +
                 "            Promise.all([\n" +
                 "                fetch('/config/playback', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body}),\n" +
@@ -1215,6 +1238,7 @@ public class ConfigWebServer {
                 "                document.getElementById('videoDecodeMode').value = d.video_decode_mode || 'auto';\n" +
                 "                document.getElementById('videoTunneling').checked = !!d.video_tunneling;\n" +
                 "                document.getElementById('epgDisplay').value = d.epg_display_enabled === false ? '0' : '1';\n" +
+                "                document.getElementById('catchupBadge').value = d.catchup_badge === false ? '0' : '1';\n" +
                 "                document.getElementById('sidebarOpacity').value = String(d.sidebar_opacity == null ? 0 : d.sidebar_opacity);\n" +
                 "                const m3uFile = d.m3u_file_path || '';\n" +
                 "                const dropDir = d.m3u_drop_dir || '';\n" +

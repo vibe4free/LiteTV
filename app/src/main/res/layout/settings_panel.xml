@@ -75,17 +75,34 @@
                     android:textColor="@color/apple_text_primary"
                     android:textSize="15sp" />
 
-                <EditText
-                    android:id="@+id/m3u_url_input"
+                <!--
+                    The field sits inside a focusable frame: the frame is what the remote lands
+                    on, so walking past it never opens the keyboard. OK on the frame hands the
+                    focus to the field and opens it.
+                -->
+                <FrameLayout
+                    android:id="@+id/m3u_url_holder"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:background="@drawable/apple_pill_input"
-                    android:inputType="textUri"
+                    android:focusable="true"
                     android:padding="12dp"
-                    android:textColor="@color/apple_text_primary"
-                    android:textColorHint="@color/apple_text_secondary"
-                    android:textSize="15sp" />
+                    android:tag="text-field">
+
+                    <EditText
+                        android:id="@+id/m3u_url_input"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@null"
+                        android:focusable="false"
+                        android:inputType="textUri"
+                        android:padding="0dp"
+                        android:singleLine="true"
+                        android:textColor="@color/apple_text_primary"
+                        android:textColorHint="@color/apple_text_secondary"
+                        android:textSize="15sp" />
+                </FrameLayout>
 
                 <Button
                     android:id="@+id/save_m3u_btn"
@@ -227,17 +244,29 @@
                     android:textColor="@color/apple_text_primary"
                     android:textSize="15sp" />
 
-                <EditText
-                    android:id="@+id/epg_url_input"
+                <FrameLayout
+                    android:id="@+id/epg_url_holder"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:background="@drawable/apple_pill_input"
-                    android:inputType="textUri"
+                    android:focusable="true"
                     android:padding="12dp"
-                    android:textColor="@color/apple_text_primary"
-                    android:textColorHint="@color/apple_text_secondary"
-                    android:textSize="15sp" />
+                    android:tag="text-field">
+
+                    <EditText
+                        android:id="@+id/epg_url_input"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@null"
+                        android:focusable="false"
+                        android:inputType="textUri"
+                        android:padding="0dp"
+                        android:singleLine="true"
+                        android:textColor="@color/apple_text_primary"
+                        android:textColorHint="@color/apple_text_secondary"
+                        android:textSize="15sp" />
+                </FrameLayout>
 
                 <Button
                     android:id="@+id/save_epg_btn"
@@ -330,6 +359,44 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
+                    android:textColor="@color/apple_text_secondary"
+                    android:textSize="12sp" />
+
+                <!-- ================= Display ================= -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/display_section"
+                    android:textColor="@color/colorAccent"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/catchup_badge"
+                        android:textColor="@color/apple_text_primary"
+                        android:textSize="15sp" />
+
+                    <com.cabletv.player.ui.ToggleSwitchView
+                        android:id="@+id/catchup_badge_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/catchup_badge_hint"
                     android:textColor="@color/apple_text_secondary"
                     android:textSize="12sp" />
 

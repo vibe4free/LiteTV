@@ -100,6 +100,7 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
     private TextView mAppVersionText;
     private ToggleSwitchView mUpdateAutoCheckToggle;
     private ToggleSwitchView mMergeSameNameToggle;
+    private ToggleSwitchView mCatchupBadgeToggle;
     private TextView mUpdateStatusText;
     private TextView mUpdateChangelogText;
     private TextView mUpdateLastCheckText;
@@ -107,6 +108,8 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
 
     /** Error string id of the last failed file copy (0 when none). */
     private int mLastFilePickError = 0;
+    /** Told when a text field is being edited, so the caller can leave the remote alone. */
+    private final java.util.List<EditText> mTextFields = new java.util.ArrayList<>();
 
     public SettingsPanel(Context context, Host host) {
         super(context);
@@ -123,6 +126,8 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
     private void bindViews() {
         mM3uUrlInput = findViewById(R.id.m3u_url_input);
         mEpgUrlInput = findViewById(R.id.epg_url_input);
+        prepareTextField(mM3uUrlInput);
+        prepareTextField(mEpgUrlInput);
         mWebServerToggle = findViewById(R.id.web_server_toggle);
         mWebServerAddress = findViewById(R.id.web_server_address);
         mEpgDisplayToggle = findViewById(R.id.epg_display_toggle);
@@ -137,10 +142,149 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
         mAppVersionText = findViewById(R.id.app_version_text);
         mUpdateAutoCheckToggle = findViewById(R.id.update_auto_check_toggle);
         mMergeSameNameToggle = findViewById(R.id.merge_same_name_toggle);
+        mCatchupBadgeToggle = findViewById(R.id.catchup_badge_toggle);
         mUpdateStatusText = findViewById(R.id.update_status_text);
         mUpdateChangelogText = findViewById(R.id.update_changelog_text);
         mUpdateLastCheckText = findViewById(R.id.update_last_check_text);
         mUpdateActionButton = findViewById(R.id.check_update_btn);
+    }
+
+    /**
+     * Makes a text field wait for OK before it starts editing.
+     *
+     * <p>The field itself is not focusable; the frame around it is. The remote lands on the frame,
+     * which draws the focus ring and otherwise behaves like any other row, so walking past a
+     * field no longer throws the on-screen keyboard over half the television. OK hands the focus
+     * to the field and opens the keyboard; BACK or an arrow key hands it back.
+     *
+     * <p>Suppressing the keyboard with {@code setShowSoftInputOnFocus(false)} was not enough on
+     * this television: its input method opens itself as soon as an editable view takes focus.
+     */
+    private void prepareTextField(final EditText field) {
+        if (field == null || !(field.getParent() instanceof View)) {
+            return;
+        }
+        final View holder = (View) field.getParent();
+        mTextFields.add(field);
+        field.setFocusable(false);
+
+        holder.setOnClickListener(v -> beginEditing(field));
+        holder.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() != android.view.KeyEvent.ACTION_UP) {
+                return false;
+            }
+            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER
+                    || keyCode == android.view.KeyEvent.KEYCODE_ENTER
+                    || keyCode == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                beginEditing(field);
+                return true;
+            }
+            return false;
+        });
+
+        field.setOnKeyListener((v, keyCode, event) -> {
+            boolean isBack = keyCode == android.view.KeyEvent.KEYCODE_BACK;
+            if (isBack) {
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                    // Swallow the press: the activity would otherwise treat it as "close me".
+                    return true;
+                }
+                if (event.getAction() == android.view.KeyEvent.ACTION_UP) {
+                    endEditing(field, 0);
+                    return true;
+                }
+                return false;
+            }
+            if (event.getAction() != android.view.KeyEvent.ACTION_UP) {
+                return false;
+            }
+            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP
+                    || keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+                // Leaving the field has to work with one press, otherwise the remote is trapped.
+                endEditing(field, keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                        ? View.FOCUS_DOWN : View.FOCUS_UP);
+                return true;
+            }
+            return false;
+        });
+
+        field.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) {
+                field.setFocusable(false);
+            }
+        });
+    }
+
+    /** Hands the focus to the field and opens the keyboard. */
+    private void beginEditing(EditText field) {
+        field.setFocusableInTouchMode(true);
+        field.setFocusable(true);
+        field.requestFocus();
+        field.setSelection(field.getText().length());
+        android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager) getContext()
+                        .getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    /** Closes the keyboard and puts the row back to "press OK to edit". */
+    private void endEditing(EditText field, int focusDirection) {
+        View holder = field.getParent() instanceof View ? (View) field.getParent() : null;
+        field.setFocusable(false);
+        // A view that keeps the focus while no longer focusable swallows the next arrow key.
+        field.clearFocus();
+        android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager) getContext()
+                        .getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
+        }
+        if (holder == null) {
+            return;
+        }
+        View next = focusDirection == 0 ? null : holder.focusSearch(focusDirection);
+        if (next != null) {
+            next.requestFocus();
+        } else {
+            holder.requestFocus();
+        }
+    }
+
+    /** What BACK should do first while the panel is open. */
+    public enum BackRoute {
+        /** Leave the text field, keeping the panel open. */
+        LEAVE_FIELD,
+        /** Nothing is being edited, so BACK closes the panel. */
+        CLOSE_PANEL
+    }
+
+    /**
+     * Decides what BACK means at this moment.
+     *
+     * <p>Kept as a plain function so the rule can be tested without an activity: while the viewer
+     * is typing, BACK belongs to the field. Before this existed the activity took the key first,
+     * so the field's own BACK handling was unreachable and the panel always closed.
+     */
+    public static BackRoute backRouteFor(boolean editingText) {
+        return editingText ? BackRoute.LEAVE_FIELD : BackRoute.CLOSE_PANEL;
+    }
+
+    /**
+     * Whether the viewer is currently typing into one of the fields.
+     *
+     * <p>A field is focusable only while it is being edited (see {@link #beginEditing}), so focus
+     * plus focusability is the state itself -- no need to ask the input method, whose answer
+     * lags behind by a moment.
+     */
+    public boolean isEditingText() {
+        for (EditText field : mTextFields) {
+            if (field.hasFocus() && field.isFocusable()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void attachListeners() {
@@ -156,6 +300,11 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
             // way an edited M3U URL does (see MainActivity's config signature check).
             AppConfig.setMergeSameNameChannelsEnabled(isChecked);
             Toast.makeText(getContext(), R.string.merge_same_name_saved, Toast.LENGTH_SHORT).show();
+            mHost.onConfigurationChanged();
+        });
+        mCatchupBadgeToggle.setOnCheckedChangeListener((btn, isChecked) -> {
+            AppConfig.setCatchupBadgeEnabled(isChecked);
+            // The badge belongs to the picture behind the panel, so it has to follow immediately.
             mHost.onConfigurationChanged();
         });
         mUpdateAutoCheckToggle.setOnCheckedChangeListener((btn, isChecked) -> {
@@ -210,6 +359,7 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
                 AppVersion.name(getContext()), AppVersion.code(getContext())));
         mUpdateAutoCheckToggle.setChecked(AppConfig.isUpdateAutoCheckEnabled());
         mMergeSameNameToggle.setChecked(AppConfig.isMergeSameNameChannelsEnabled());
+        mCatchupBadgeToggle.setChecked(AppConfig.isCatchupBadgeEnabled());
         renderUpdateStatus();
         updateM3uEpgInfo();
         updateM3uFileInfo();
@@ -405,6 +555,10 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
             return null;
         }
         if (view instanceof android.widget.EditText) {
+            return null;
+        }
+        if ("text-field".equals(view.getTag())) {
+            // Land on a normal control first; the viewer presses OK when they mean to type.
             return null;
         }
         if (view.isFocusable() && view.getVisibility() == View.VISIBLE) {

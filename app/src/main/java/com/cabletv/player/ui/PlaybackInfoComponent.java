@@ -197,6 +197,16 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
         startAnimation(fadeOut);
     }
 
+    /**
+     * Moves the text inwards, leaving the left edge free for the replay badge.
+     *
+     * <p>Only the leading inset changes, so the strip keeps its height and the text keeps its
+     * place in everything else.
+     */
+    public void setLeadingInsetDp(int dp) {
+        mInfoContainer.setPadding(dp2px(dp), dp2px(8), dp2px(16), dp2px(8));
+    }
+
     @Override
     public void attach(@NonNull ControlWrapper controlWrapper) {
     }

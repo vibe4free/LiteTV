@@ -32,6 +32,7 @@ public class AppConfig {
     private static final String UPDATE_PENDING_VERSION_KEY = "app_update_pending_version";
     private static final String UPDATE_PENDING_NAME_KEY = "app_update_pending_name";
     private static final String MERGE_SAME_NAME_CHANNELS_KEY = "app_merge_same_name_channels";
+    private static final String CATCHUP_BADGE_KEY = "app_catchup_badge";
 
     private static final String DEFAULT_EPG_URL = "";
     /**
@@ -312,5 +313,20 @@ public class AppConfig {
 
     public static void setMergeSameNameChannelsEnabled(boolean enabled) {
         Hawk.put(MERGE_SAME_NAME_CHANNELS_KEY, enabled);
+    }
+
+    /**
+     * Whether a replay shows a badge in the corner of the picture.
+     *
+     * <p>On by default: a viewer who rewinds a programme and walks away comes back to something
+     * that looks exactly like live TV, and the badge is what tells them it is not. It can be
+     * switched off for people who find it distracting.
+     */
+    public static boolean isCatchupBadgeEnabled() {
+        return Hawk.get(CATCHUP_BADGE_KEY, true);
+    }
+
+    public static void setCatchupBadgeEnabled(boolean enabled) {
+        Hawk.put(CATCHUP_BADGE_KEY, enabled);
     }
 }

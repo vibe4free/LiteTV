@@ -98,6 +98,7 @@
 
     <string name="catchup_started">回看 · %1$s</string>
     <string name="catchup_exited">已返回直播</string>
+    <string name="catchup_unavailable">该时段无法回看，已返回直播</string>
     <string name="catchup_not_available">该频道不支持回看</string>
     <string name="catchup_no_program">暂无节目可回看</string>
 
@@ -105,8 +106,10 @@
     <string name="source_only_one">该频道只有一个源</string>
     <string name="timeshift_position">播放位置 %1$s</string>
     <string name="timeshift_behind_live">距直播 %1$s</string>
-    <string name="timeshift_window">%1$s – %2$s</string>
-    <string name="back_to_live">◉ 回到直播</string>
+    <string name="display_section">显示</string>
+    <string name="catchup_badge">回放标记</string>
+    <string name="catchup_badge_hint">回看时在画面角落显示一个小标记，提示当前不是直播。</string>
+    <string name="back_to_live">回到直播</string>
 
     <string name="exit_confirm_title">退出 LiteTV？</string>
     <string name="exit_confirm_message">确定要退出吗？</string>

@@ -1,6 +1,7 @@
 package com.cabletv.player.server;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -39,6 +40,8 @@ public class ConfigWebServerTest {
 
     private final AtomicReference<String> mLastFileChange = new AtomicReference<>();
     private int mPort;
+    /** Set when the web page saves a display preference. */
+    private boolean mDisplayChangeSeen;
 
     @Before
     public void setUp() throws Exception {
@@ -51,6 +54,7 @@ public class ConfigWebServerTest {
             @Override public void onEpgUrlChanged(String u) { }
             @Override public void onEpgPreferenceChanged(String p) { }
             @Override public void onM3uFileChanged(String path) { mLastFileChange.set(path); }
+            @Override public void onDisplaySettingsChanged() { mDisplayChangeSeen = true; }
         });
         ConfigWebServer.startServer(context, mPort);
         mLastFileChange.set(null);
@@ -334,6 +338,24 @@ public class ConfigWebServerTest {
     }
 
     // ---- update endpoints ----
+
+    @Test
+    public void displayPost_savesTheReplayBadgeSwitch() throws Exception {
+        AppConfig.setCatchupBadgeEnabled(true);
+
+        String[] res = request("POST", "/config/display",
+                "Content-Type: application/x-www-form-urlencoded\r\n", "catchup_badge=0");
+        assertEquals("200", res[0]);
+        assertTrue(res[1].contains("\"success\":true"));
+        assertFalse("the switch must actually change", AppConfig.isCatchupBadgeEnabled());
+        assertTrue("the player must be told, or the picture keeps the old setting",
+                mDisplayChangeSeen);
+
+        String[] config = request("GET", "/config/get", null, null);
+        assertTrue("the page must be able to read it back: " + config[1],
+                config[1].contains("\"catchup_badge\":false"));
+        AppConfig.setCatchupBadgeEnabled(true);
+    }
 
     @Test
     public void updateSettingsPost_savesTheAutoCheckSwitchAndReportsItBack() throws Exception {

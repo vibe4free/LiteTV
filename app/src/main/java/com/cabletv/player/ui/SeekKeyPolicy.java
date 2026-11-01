@@ -28,34 +28,59 @@ final class SeekKeyPolicy {
     }
 
     /**
-     * Whether the horizontal keys currently mean "move the playhead".
+     * Whether the keys mean "seek", given what is on screen.
      *
-     * <p>Yes while the time-shift bar is on screen (the viewer is adjusting the playhead rather
-     * than browsing the list) and while a catchup is running. Otherwise the keys keep their
-     * plain meaning: switching columns in the list, paging the guide by a day.
+     * <p>The list has priority: while it is open the horizontal keys belong to its columns
+     * (switching column, paging the guide by a day), even during a replay. Letting a replay keep
+     * the keys took them away from the list the viewer had just opened, which left the guide
+     * impossible to navigate while rewinding.
+     *
+     * <p>Full screen they always seek: LEFT while watching live rewinds from this moment rather
+     * than restarting the programme from its beginning.
      */
-    static boolean applies(boolean catchupActive, boolean barVisible) {
-        return catchupActive || barVisible;
+    static boolean appliesOnScreen(boolean listOpen) {
+        return !listOpen;
     }
 
-    /** The speed for a given step of the ladder, wrapping around at the end. */
-    static int rate(int index) {
-        return RATES[Math.floorMod(index, RATES.length)];
-    }
-
-    /** The speed after the current one; the ladder starts over after the last speed. */
+    /**
+     * The speed after the current one.
+     *
+     * <p>It stops at the fastest rather than starting over: a key that is still held down must
+     * keep rewinding at 4x. Cycling back to 2x mid-hold made the picture visibly slow down and
+     * speed up again while the viewer was doing nothing.
+     */
     static int nextRateIndex(int index) {
-        return (index + 1) % RATES.length;
+        return Math.min(index + 1, RATES.length - 1);
+    }
+
+    /**
+     * How far a released hold moves the playhead.
+     *
+     * <p>Everything the hold accumulated, or a single step when the hold was too brief to add up
+     * to one. The comparison has to follow the direction: taking the larger of the two values
+     * with {@code Math.max} looks right for forward seeks and silently throws away a rewind,
+     * which is why a held LEFT used to move ten seconds however long it was pressed.
+     */
+    static long holdDistance(long accumulatedMs, long stepMs, int direction) {
+        if (Math.abs(accumulatedMs) < stepMs) {
+            return direction * stepMs;
+        }
+        return accumulatedMs;
     }
 
     /**
      * The distance travelled while a key was held.
+     *
+     * <p>The rate multiplies the <em>step</em>, not the playback speed: at 4x the playhead moves
+     * four ten-second steps every second, i.e. forty seconds of programme per second of holding.
+     * Treating it as a playback speed instead (four seconds per second) made a held key crawl
+     * and never matched the numbers shown on screen.
      *
      * @param elapsedMs how long the key was held
      * @param rate      the speed it was seeking at
      * @param direction -1 for LEFT, 1 for RIGHT
      */
     static long distance(long elapsedMs, int rate, int direction) {
-        return Math.max(0, elapsedMs) * rate * direction;
+        return Math.max(0, elapsedMs) * rate * STEP_MS / 1000L * direction;
     }
 }

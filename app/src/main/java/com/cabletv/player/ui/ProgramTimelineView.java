@@ -54,7 +54,22 @@ public class ProgramTimelineView extends View {
     private final Paint mLivePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF mRect = new RectF();
 
+    /** Told while the viewer drags along the track. */
+    public interface OnScrubListener {
+        /** A finger went down on the track. */
+        void onScrubStart();
+
+        /** The finger is at this moment; show it, but do not chase the stream yet. */
+        void onScrubTo(long timeMs);
+
+        /** The finger lifted here: this is the position to play from. */
+        void onScrubCommit(long timeMs);
+    }
+
     private final List<Segment> mSegments = new ArrayList<>();
+    private OnScrubListener mScrubListener;
+    /** True between the finger going down and coming back up. */
+    private boolean mScrubbing;
     private long mWindowStartMs;
     private long mWindowEndMs;
     private long mPositionMs;
@@ -71,6 +86,7 @@ public class ProgramTimelineView extends View {
         mCurrentPaint.setColor(Color.parseColor("#FF6B35"));
         mPlayheadPaint.setColor(Color.WHITE);
         mLivePaint.setColor(Color.parseColor("#FF9966"));
+        setClickable(true);
     }
 
     /** The window the track covers, and where the playhead sits inside it. */
@@ -105,6 +121,76 @@ public class ProgramTimelineView extends View {
     public void setPosition(long positionMs) {
         mPositionMs = positionMs;
         invalidate();
+    }
+
+    public void setOnScrubListener(OnScrubListener listener) {
+        mScrubListener = listener;
+    }
+
+    /**
+     * The track is the control.
+     *
+     * <p>It used to sit under a system seek bar, which drew its own thumb on its own scale: the
+     * two markers never lined up because the platform thumb is inset by its own width. Here the
+     * marker the viewer sees is the only marker there is, and the touch maths uses the same
+     * mapping as the drawing.
+     */
+    @Override
+    public boolean onTouchEvent(android.view.MotionEvent event) {
+        if (mWindowEndMs <= mWindowStartMs || getWidth() <= 0) {
+            return false;
+        }
+        switch (event.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_DOWN:
+                mScrubbing = true;
+                if (getParent() != null) {
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                }
+                if (mScrubListener != null) {
+                    mScrubListener.onScrubStart();
+                }
+                moveToX(event.getX());
+                return true;
+            case android.view.MotionEvent.ACTION_MOVE:
+                if (!mScrubbing) {
+                    return false;
+                }
+                moveToX(event.getX());
+                return true;
+            case android.view.MotionEvent.ACTION_UP:
+                if (!mScrubbing) {
+                    return false;
+                }
+                mScrubbing = false;
+                moveToX(event.getX());
+                if (mScrubListener != null) {
+                    mScrubListener.onScrubCommit(mPositionMs);
+                }
+                return true;
+            case android.view.MotionEvent.ACTION_CANCEL:
+                if (!mScrubbing) {
+                    return false;
+                }
+                mScrubbing = false;
+                if (mScrubListener != null) {
+                    mScrubListener.onScrubCommit(mPositionMs);
+                }
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** Maps a touch to a moment and reports it; the drawing uses the very same mapping. */
+    private void moveToX(float x) {
+        long span = mWindowEndMs - mWindowStartMs;
+        float clamped = Math.max(0f, Math.min(getWidth(), x));
+        mPositionMs = Math.max(mWindowStartMs,
+                Math.min(mWindowEndMs, mWindowStartMs + (long) (clamped / getWidth() * span)));
+        invalidate();
+        if (mScrubListener != null) {
+            mScrubListener.onScrubTo(mPositionMs);
+        }
     }
 
     @Override
@@ -152,7 +238,8 @@ public class ProgramTimelineView extends View {
             if (mRect.right <= mRect.left) {
                 continue;
             }
-            boolean current = mPositionMs >= segment.startTime && mPositionMs < segment.endTime;
+            // Inclusive at the end: live playback parks the playhead on the window end.
+            boolean current = mPositionMs >= segment.startTime && mPositionMs <= segment.endTime;
             canvas.drawRoundRect(mRect, trackHeight / 2f, trackHeight / 2f,
                     current ? mCurrentPaint : mSegmentPaint);
         }

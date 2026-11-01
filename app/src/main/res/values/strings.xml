@@ -98,6 +98,7 @@
 
     <string name="catchup_started">Replay · %1$s</string>
     <string name="catchup_exited">Returned to live TV</string>
+    <string name="catchup_unavailable">That part of the replay is not available; back to live TV</string>
     <string name="catchup_not_available">This channel does not support catchup</string>
     <string name="catchup_no_program">No programme available to replay</string>
 
@@ -105,8 +106,10 @@
     <string name="source_only_one">This channel has a single source</string>
     <string name="timeshift_position">Position %1$s</string>
     <string name="timeshift_behind_live">Behind live %1$s</string>
-    <string name="timeshift_window">%1$s – %2$s</string>
-    <string name="back_to_live">◉ Live</string>
+    <string name="display_section">Display</string>
+    <string name="catchup_badge">Replay badge</string>
+    <string name="catchup_badge_hint">Shows a small replay mark in the corner while you are watching a replay.</string>
+    <string name="back_to_live">Live</string>
 
     <string name="exit_confirm_title">Exit LiteTV?</string>
     <string name="exit_confirm_message">Are you sure you want to exit?</string>

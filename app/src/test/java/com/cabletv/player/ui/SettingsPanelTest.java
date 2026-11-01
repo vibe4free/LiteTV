@@ -203,6 +203,65 @@ public class SettingsPanelTest {
     }
 
     @Test
+    public void theReplayBadgeIsOnByDefaultAndCanBeSwitchedOff() {
+        AppConfig.setCatchupBadgeEnabled(true);
+        mPanel.loadValues();
+
+        ToggleSwitchView badge = mPanel.findViewById(R.id.catchup_badge_toggle);
+        assertTrue("a viewer must be able to tell a replay from live TV",
+                badge.isChecked());
+
+        badge.performClick();
+        assertFalse("the switch must be stored", AppConfig.isCatchupBadgeEnabled());
+        assertTrue("the picture has to follow immediately", mConfigChanged);
+        AppConfig.setCatchupBadgeEnabled(true);
+    }
+
+    /**
+     * Walking past a text field with the remote must not open the keyboard: on a television it
+     * covers half the picture, and the viewer was only on their way to the next row.
+     */
+    @Test
+    public void aTextFieldOnlyStartsEditingWhenAsked() {
+        View holder = mPanel.findViewById(R.id.m3u_url_holder);
+        View field = mPanel.findViewById(R.id.m3u_url_input);
+
+        assertNotNull("the field needs a focusable frame around it", holder);
+        assertNotNull(field);
+        assertTrue("the frame is what the remote lands on", holder.isFocusable());
+        assertFalse("the field itself must not take the focus", field.isFocusable());
+
+        // The frame is clickable, so OK on it is what starts editing (verified on the television:
+        // walking the focus past the row leaves the keyboard closed, OK opens it).
+        assertTrue("the frame must answer OK", holder.isClickable());
+    }
+
+    @Test
+    public void theReplayBadgeSitsWithTheGuideSettings() {
+        // Both live in the same part of the panel: the guide and what it shows on screen.
+        assertNotNull(mPanel.findViewById(R.id.epg_preference_group));
+        assertNotNull(mPanel.findViewById(R.id.catchup_badge_toggle));
+    }
+
+    /**
+     * BACK used to close the whole panel even while typing, because the activity took the key
+     * before the field saw it. The field's own BACK handling was therefore dead code.
+     */
+    @Test
+    public void backLeavesTheFieldFirstAndThePanelSecond() {
+        assertEquals(SettingsPanel.BackRoute.LEAVE_FIELD,
+                SettingsPanel.backRouteFor(true));
+        assertEquals(SettingsPanel.BackRoute.CLOSE_PANEL,
+                SettingsPanel.backRouteFor(false));
+    }
+
+    @Test
+    public void nothingIsBeingEditedWhenThePanelOpens() {
+        assertFalse("the panel opens on a normal control, not in a text field",
+                mPanel.isEditingText());
+    }
+
+    @Test
     public void theSwitchAnswersTheRemote() {
         ToggleSwitchView toggle = mPanel.findViewById(R.id.web_server_toggle);
         boolean before = toggle.isChecked();

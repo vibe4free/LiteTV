@@ -59,6 +59,78 @@ public class ProgramTimelineTest {
         assertEquals("Two", view.getSegments().get(1).title);
     }
 
+    private static TimeShiftBarComponent newBar() {
+        return new TimeShiftBarComponent(org.robolectric.RuntimeEnvironment.getApplication());
+    }
+
+    /**
+     * The ticker used to drag the playhead back to "now" every second, including during a
+     * catchup. Every seek was undone a second later, which looked exactly like the remote key
+     * doing nothing at all.
+     */
+    @Test
+    public void aReplayDoesNotFollowTheClock() {
+        TimeShiftBarComponent bar = newBar();
+        long start = 1_700_000_000_000L;
+        bar.setWindow(start - 3_600_000L, start + 3_600_000L, start - 600_000L);
+        bar.setLiveMode(false, start);
+        bar.show();
+
+        bar.tickIfIdle(start + 3_000L);
+
+        assertEquals("the playhead must stay where the viewer put it",
+                start - 600_000L, bar.findShownPositionMs());
+    }
+
+    @Test
+    /**
+     * The window live playback builds ends at "now". The thumb used to freeze on that instant and
+     * never move again, while the distance-to-live reading kept counting up: the bar claimed the
+     * viewer was falling behind the broadcast while they were watching it.
+     */
+    public void watchingLiveKeepsThePlayheadOnTheClock() {
+        TimeShiftBarComponent bar = newBar();
+        long start = 1_700_000_000_000L;
+        bar.setWindow(start - 3_600_000L, start, start);   // no spare tail: this is what live does
+        bar.setLiveMode(true, start);
+        bar.show();
+
+        // Three seconds later the thumb must have moved three seconds, not stayed put.
+        bar.tickIfIdle(start + 3_000L);
+
+        assertEquals("the thumb follows the broadcast",
+                start + 3_000L, bar.findShownPositionMs());
+        assertEquals("nothing is being missed while watching live",
+                0L, bar.findBehindLiveMs());
+    }
+
+    /**
+     * The distance to live has to be measured from "now". The window carries a long catchup
+     * tail, so measuring from its end said "8 hours behind live" while sitting at the live edge.
+     */
+    @Test
+    public void theDistanceToLiveIsMeasuredFromNow() {
+        TimeShiftBarComponent bar = newBar();
+        long now = 1_700_000_000_000L;
+        bar.setLiveMode(false, now);
+        // A window whose end is eight hours of catchup tail away from "now".
+        bar.setWindow(now - 600_000L, now + 8 * 3_600_000L, now - 600_000L);
+
+        assertEquals(600_000L, bar.findBehindLiveMs());
+    }
+
+    /** The point of the whole thing: ending a seek starts the six second countdown again. */
+    @Test
+    public void endingASeekLetsTheStripFadeAwayAgain() {
+        TimeShiftBarComponent bar = newBar();
+        bar.showWhileSeeking();
+
+        bar.endSeeking();
+
+        assertTrue("the strip must count down to hiding after a seek",
+                bar.hasPendingAutoHide());
+    }
+
     @Test
     public void anEmptyGuideLeavesTheTrackEmpty() {
         ProgramTimelineView view = new ProgramTimelineView(
