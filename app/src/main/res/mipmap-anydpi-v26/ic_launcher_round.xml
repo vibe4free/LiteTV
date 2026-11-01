@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android 8 and newer: the system crops the icon to the launcher's own shape, so the artwork is
+    split into a full-bleed background and a foreground kept inside the 72dp safe area. Older
+    releases (including the Android 6 television) fall back to the mipmap PNGs, which are full
+    bleed as well, so neither path leaves a border.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The adaptive icon's back layer: the deep blue from the bottom corner of the artwork, so the
+    icon reads as one solid tile whatever shape the launcher crops it to.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FF122E80" />
+</shape>
