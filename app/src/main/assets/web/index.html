@@ -19,6 +19,29 @@
         .status { padding: 10px; border-radius: 4px; margin-top: 8px; font-size: 12px; display: none; }
         .status.success { background-color: #2d5a2d; color: #90EE90; display: block; }
         .status.error { background-color: #5a2d2d; color: #FF6B6B; display: block; }
+        .status, .info { word-break: break-word; }
+
+        /* Selects and file pickers share the text fields' look. */
+        select.field, input.field { -webkit-appearance: none; appearance: none; }
+        .field { width: 100%; padding: 12px; margin-bottom: 10px; background-color: #1a1a1a; color: #fff;
+                 border: 1px solid #444; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
+
+        /* Phones: bigger targets, roomier text, nothing that needs a sideways scroll.
+           16px is also the threshold below which mobile Safari zooms the page in on focus. */
+        body { -webkit-text-size-adjust: 100%; }
+        input[type="text"], input[type="url"], textarea, select, button { font-size: 16px; }
+        button, select, input[type="text"], input[type="url"], input[type="file"], textarea {
+            min-height: 44px;
+        }
+        @media (max-width: 520px) {
+            body { padding: 12px; }
+            h1 { font-size: 20px; margin-bottom: 18px; }
+            .section { padding: 14px; margin-bottom: 14px; }
+            .section h2 { font-size: 16px; }
+            button { width: 100%; }
+            label { font-size: 15px; }
+            .info, .status { font-size: 13px; }
+        }
     </style>
 </head>
 <body>
@@ -56,7 +79,7 @@
             <button onclick="saveEpgUrl()">保存 EPG 地址</button>
             <div id="epgStatus" class="status"></div>
             <label for="epgPreference" style="margin-top:16px;">EPG 来源优先级:</label>
-            <select id="epgPreference" style="width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+            <select id="epgPreference" class="field">
                 <option value="auto">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</option>
                 <option value="m3u">优先使用 M3U 内置 EPG</option>
                 <option value="user">仅使用我设置的 EPG</option>
@@ -70,12 +93,12 @@
         <div class="section">
             <h2>播放与显示</h2>
             <label for="videoRenderMode">画面输出方式:</label>
-            <select id="videoRenderMode" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+            <select id="videoRenderMode" class="field">
                 <option value="surface">SurfaceView（推荐，画面更清晰）</option>
                 <option value="texture">TextureView（兼容备用）</option>
             </select>
             <label for="videoDecodeMode">解码方式:</label>
-            <select id="videoDecodeMode" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+            <select id="videoDecodeMode" class="field">
                 <option value="auto">自动（优先硬件，失败回退软件）</option>
                 <option value="hardware">仅硬件解码</option>
                 <option value="software">优先软件解码（可解决个别频道打不开）</option>
@@ -84,17 +107,17 @@
                 <input type="checkbox" id="videoTunneling"> 视频直通显示（实验，部分电视画面更流畅）
             </label>
             <label for="epgDisplay">频道列表显示节目单:</label>
-            <select id="epgDisplay" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+            <select id="epgDisplay" class="field">
                 <option value="1">显示</option>
                 <option value="0">不显示</option>
             </select>
             <label for="catchupBadge">回看时显示回放标记:</label>
-            <select id="catchupBadge" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+            <select id="catchupBadge" class="field">
                 <option value="1">显示（默认）</option>
                 <option value="0">不显示</option>
             </select>
             <label for="sidebarOpacity">频道列表背景:</label>
-            <select id="sidebarOpacity" style="width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+            <select id="sidebarOpacity" class="field">
                 <option value="0">半透明（默认）</option>
                 <option value="1">半不透明</option>
                 <option value="2">不透明</option>
