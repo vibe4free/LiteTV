@@ -165,6 +165,23 @@ public class ChannelRepositoryLocalTest {
         assertNull(mLoadFailure.get());
     }
 
+    /**
+     * Reloading a playlist must not lose the channel that is playing. Without a "not found"
+     * answer, a reload looked identical to "you are on channel 0", so editing the source or
+     * flipping the merge switch dropped the viewer onto the first channel.
+     */
+    @Test
+    public void findChannelIndex_pointsAtThePlayingChannel() {
+        AppConfig.setM3uFilePath(mLocalFile.getAbsolutePath());
+        ChannelRepository repo = newRepository();
+        reloadAndWait(repo);
+
+        assertEquals(2, repo.findChannelIndex("http://stream/cctv5"));
+        assertEquals("a channel that is gone must not be reported as index 0",
+                -1, repo.findChannelIndex("http://stream/vanished"));
+        assertEquals(-1, repo.findChannelIndex(""));
+    }
+
     @Test
     public void load_bomAndCrLf_stillParses() throws Exception {
         // A file written by Windows Notepad: UTF-8 BOM + CRLF line endings.

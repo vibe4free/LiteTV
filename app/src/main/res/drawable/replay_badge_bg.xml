@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A soft dark disc behind the replay mark.
+
+    On its own the accent-coloured arrow is only about 2:1 against a bright picture, which is
+    below the level where a small mark stays readable. The disc pushes that to roughly 3:1 while
+    staying quiet on dark scenes.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#66000000" />
+</shape>

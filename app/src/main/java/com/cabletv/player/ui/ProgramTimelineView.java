@@ -97,6 +97,21 @@ public class ProgramTimelineView extends View {
         invalidate();
     }
 
+    /**
+     * Whether the playhead has run past the last programme the track knows about.
+     *
+     * <p>Live playback keeps moving while the bar is open, so it eventually crosses into a
+     * programme that was not in the guide excerpt used to build the track. That is the signal to
+     * ask for a fresh excerpt.
+     */
+    public boolean isPastLastSegment() {
+        if (mSegments.isEmpty()) {
+            return false;
+        }
+        Segment last = mSegments.get(mSegments.size() - 1);
+        return mPositionMs > last.endTime;
+    }
+
     /** The programmes currently drawn; the bar reads them to name the one being watched. */
     public List<Segment> getSegments() {
         return mSegments;

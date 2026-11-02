@@ -110,6 +110,14 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
     private int mLastFilePickError = 0;
     /** Told when a text field is being edited, so the caller can leave the remote alone. */
     private final java.util.List<EditText> mTextFields = new java.util.ArrayList<>();
+    /**
+     * The field being edited, or null.
+     *
+     * <p>Tracked explicitly rather than inferred from focus: clearing the focus of a field that
+     * was focusable a moment ago does not take effect immediately, so focus-based checks lag one
+     * key press behind and BACK had to be pressed twice before the panel would close.
+     */
+    private EditText mEditingField;
 
     public SettingsPanel(Context context, Host host) {
         super(context);
@@ -167,6 +175,11 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
         final View holder = (View) field.getParent();
         mTextFields.add(field);
         field.setFocusable(false);
+        if (field instanceof SettingsEditText) {
+            // BACK must be handled before the input method, or the keyboard closes and the field
+            // stays in its editing state.
+            ((SettingsEditText) field).setOnBackPressed(() -> endEditing(field, 0));
+        }
 
         holder.setOnClickListener(v -> beginEditing(field));
         holder.setOnKeyListener((v, keyCode, event) -> {
@@ -211,12 +224,16 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
         field.setOnFocusChangeListener((v, hasFocus) -> {
             if (!hasFocus) {
                 field.setFocusable(false);
+                if (mEditingField == field) {
+                    mEditingField = null;
+                }
             }
         });
     }
 
     /** Hands the focus to the field and opens the keyboard. */
     private void beginEditing(EditText field) {
+        mEditingField = field;
         field.setFocusableInTouchMode(true);
         field.setFocusable(true);
         field.requestFocus();
@@ -232,6 +249,9 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
     /** Closes the keyboard and puts the row back to "press OK to edit". */
     private void endEditing(EditText field, int focusDirection) {
         View holder = field.getParent() instanceof View ? (View) field.getParent() : null;
+        if (mEditingField == field) {
+            mEditingField = null;
+        }
         field.setFocusable(false);
         // A view that keeps the focus while no longer focusable swallows the next arrow key.
         field.clearFocus();
@@ -245,11 +265,14 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
             return;
         }
         View next = focusDirection == 0 ? null : holder.focusSearch(focusDirection);
-        if (next != null) {
-            next.requestFocus();
-        } else {
-            holder.requestFocus();
+        if (next == null) {
+            next = holder;
         }
+        final View target = next;
+        // One frame later: asking for focus in the same pass as setFocusable(false) fails,
+        // because the view tree has not recomputed yet. The focus then stayed on the field, so
+        // the next BACK was swallowed by it again and the panel needed a third press to close.
+        holder.post(target::requestFocus);
     }
 
     /** What BACK should do first while the panel is open. */
@@ -279,12 +302,22 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
      * lags behind by a moment.
      */
     public boolean isEditingText() {
-        for (EditText field : mTextFields) {
-            if (field.hasFocus() && field.isFocusable()) {
-                return true;
-            }
+        return mEditingField != null;
+    }
+
+    /**
+     * Leaves the field being edited.
+     *
+     * <p>Called by the activity when BACK arrives while typing. The key never reaches the field:
+     * the input method takes it first to close the keyboard, so the field's own BACK handling
+     * never runs and the editing state would outlive the press -- the panel then needed a second
+     * press to close.
+     */
+    public void stopEditing() {
+        EditText field = mEditingField;
+        if (field != null) {
+            endEditing(field, 0);
         }
-        return false;
     }
 
     private void attachListeners() {

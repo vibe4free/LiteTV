@@ -1,6 +1,7 @@
 package com.cabletv.player.ui;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -129,6 +130,30 @@ public class ProgramTimelineTest {
 
         assertTrue("the strip must count down to hiding after a seek",
                 bar.hasPendingAutoHide());
+    }
+
+    /**
+     * Live playback keeps moving while the bar is open. When it crosses into a programme the
+     * track was never told about, the programme name used to vanish and the highlight with it --
+     * this is the signal the player uses to ask for a fresh excerpt.
+     */
+    @Test
+    public void theTrackReportsWhenThePlayheadLeavesTheGuideItWasGiven() {
+        TimeShiftBarComponent bar = newBar();
+        long start = 1_700_000_000_000L;
+        long hour = 3_600_000L;
+        bar.setWindow(start - hour, start, start);
+        bar.setLiveMode(true, start);
+        bar.setPrograms(Arrays.asList(
+                new ProgramTimelineView.Segment("First", start - hour, start),
+                new ProgramTimelineView.Segment("Second", start, start + hour)));
+        bar.show();
+
+        bar.tickIfIdle(start - 1000L);
+        assertFalse("still inside the excerpt", bar.isPastLastProgramme());
+
+        bar.tickIfIdle(start + 2 * hour);
+        assertTrue("two hours on, the excerpt is stale", bar.isPastLastProgramme());
     }
 
     @Test

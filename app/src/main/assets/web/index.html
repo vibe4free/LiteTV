@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiteTV 配置</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; margin: 0; padding: 20px; }
+        .container { max-width: 700px; margin: 0 auto; }
+        h1 { color: #FF6B35; margin-bottom: 30px; text-align: center; }
+        .section { background-color: #2a2a2a; border-left: 4px solid #FF6B35; border-radius: 4px; padding: 20px; margin-bottom: 20px; }
+        .section h2 { color: #FF6B35; margin-top: 0; font-size: 18px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }
+        input[type="text"], input[type="url"], textarea { width: 100%; padding: 10px; margin-bottom: 12px; background-color: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        input[type="text"]:focus, input[type="url"]:focus, textarea:focus { outline: none; border-color: #FF6B35; }
+        button { background-color: #FF6B35; color: #fff; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background-color 0.3s; }
+        button:hover { background-color: #ff7d52; }
+        .info { font-size: 12px; color: #aaa; margin-top: 8px; line-height: 1.5; }
+        .status { padding: 10px; border-radius: 4px; margin-top: 8px; font-size: 12px; display: none; }
+        .status.success { background-color: #2d5a2d; color: #90EE90; display: block; }
+        .status.error { background-color: #5a2d2d; color: #FF6B6B; display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📺 LiteTV 配置</h1>
+        
+        <div class="section">
+            <h2>M3U 播放列表</h2>
+            <label for="m3uUrl">播放列表 URL:</label>
+            <input type="url" id="m3uUrl" placeholder="http://example.com/playlist.m3u">
+            <div class="info">输入 M3U 播放列表的完整 URL，例如: http://example.com/playlist.m3u</div>
+            <button onclick="saveM3uUrl()">保存 M3U URL</button>
+            <div id="m3uStatus" class="status"></div>
+            <div id="m3uFileInfo" class="info"></div>
+            <div id="m3uDropDirInfo" class="info"></div>
+            <label for="m3uUploadInput" style="margin-top:12px;">从本机上传 M3U 文件（手机 / 电脑选择）:</label>
+            <input type="file" id="m3uUploadInput" accept=".m3u,.m3u8,.txt,text/plain" style="margin-bottom:12px;">
+            <button onclick="uploadM3uFile()">上传并启用</button>
+            <div id="uploadStatus" class="status"></div>
+            <button id="clearM3uFileBtn" onclick="clearM3uFile()" style="display:none;">清除本地文件</button>
+            <div id="m3uFileStatus" class="status"></div>
+            <label style="display:flex;align-items:center;gap:8px;margin:12px 0;">
+                <input type="checkbox" id="mergeSameName"> 合并同名频道（同一频道多个源合成一个）
+            </label>
+            <button onclick="saveChannels()">保存频道设置</button>
+            <div id="channelsStatus" class="status"></div>
+            <div class="info">订阅链接常把同一频道按不同源重复列出；开启后合并为一个频道并依次尝试各个源（播放界面按 R 或双击可手动切换源）。列表本身没有重复时无任何影响。</div>
+        </div>
+        
+        <div class="section">
+            <h2>EPG 电子节目单</h2>
+            <label for="epgUrl">EPG 地址模板:</label>
+            <input type="url" id="epgUrl" placeholder="http://epg.example.com/api/diyp?ch={name}&date={date}">
+            <div class="info">支持 {name} 和 {date} 占位符，例如: http://epg.example.com/api/diyp?ch={name}&date={date}</div>
+            <button onclick="saveEpgUrl()">保存 EPG 地址</button>
+            <div id="epgStatus" class="status"></div>
+            <label for="epgPreference" style="margin-top:16px;">EPG 来源优先级:</label>
+            <select id="epgPreference" style="width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+                <option value="auto">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</option>
+                <option value="m3u">优先使用 M3U 内置 EPG</option>
+                <option value="user">仅使用我设置的 EPG</option>
+            </select>
+            <button onclick="saveEpgPreference()">保存优先级</button>
+            <div id="epgPrefStatus" class="status"></div>
+            <div id="epgM3uInfo" class="info"></div>
+            <div id="epgActiveInfo" class="info"></div>
+        </div>
+        
+        <div class="section">
+            <h2>播放与显示</h2>
+            <label for="videoRenderMode">画面输出方式:</label>
+            <select id="videoRenderMode" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+                <option value="surface">SurfaceView（推荐，画面更清晰）</option>
+                <option value="texture">TextureView（兼容备用）</option>
+            </select>
+            <label for="videoDecodeMode">解码方式:</label>
+            <select id="videoDecodeMode" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+                <option value="auto">自动（优先硬件，失败回退软件）</option>
+                <option value="hardware">仅硬件解码</option>
+                <option value="software">优先软件解码（可解决个别频道打不开）</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                <input type="checkbox" id="videoTunneling"> 视频直通显示（实验，部分电视画面更流畅）
+            </label>
+            <label for="epgDisplay">频道列表显示节目单:</label>
+            <select id="epgDisplay" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+                <option value="1">显示</option>
+                <option value="0">不显示</option>
+            </select>
+            <label for="catchupBadge">回看时显示回放标记:</label>
+            <select id="catchupBadge" style="width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+                <option value="1">显示（默认）</option>
+                <option value="0">不显示</option>
+            </select>
+            <label for="sidebarOpacity">频道列表背景:</label>
+            <select id="sidebarOpacity" style="width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;">
+                <option value="0">半透明（默认）</option>
+                <option value="1">半不透明</option>
+                <option value="2">不透明</option>
+            </select>
+            <button onclick="savePlayback()">保存播放设置</button>
+            <div id="playbackStatus" class="status"></div>
+            <div class="info">播放设置需重启电视端应用后生效；显示设置下次打开频道列表时生效。</div>
+        </div>
+        
+        <div class="section">
+            <h2>关于 / 更新</h2>
+            <div id="appVersionInfo" class="info"></div>
+            <label style="display:flex;align-items:center;gap:8px;margin:12px 0;">
+                <input type="checkbox" id="updateAutoCheck"> 自动检查更新（每天最多一次）
+            </label>
+            <div id="updateStateInfo" class="info"></div>
+            <div id="updateChangelog" class="info" style="white-space:pre-line;"></div>
+            <button onclick="checkUpdate()">检查更新</button>
+            <button onclick="installUpdate()" id="updateInstallBtn" style="margin-left:8px;">立即更新</button>
+            <div id="updateStatus" class="status"></div>
+            <div class="info">「立即更新」会让电视自动下载并校验安装包，然后在电视上弹出系统安装确认——安装需要有人在电视旁按确认。</div>
+        </div>
+    </div>
+    <script>
+        function saveM3uUrl() {
+            const url = document.getElementById('m3uUrl').value.trim();
+            if (!url) { alert('请输入 M3U URL'); return; }
+            fetch('/config/m3u-url', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'm3u_url=' + encodeURIComponent(url)
+            }).then(r => r.json()).then(d => {
+                const status = document.getElementById('m3uStatus');
+                if (d.success) {
+                    status.className = 'status success';
+                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';
+                } else {
+                    status.className = 'status error';
+                    status.textContent = '✗ ' + d.message;
+                }
+            }).catch(e => {
+                document.getElementById('m3uStatus').className = 'status error';
+                document.getElementById('m3uStatus').textContent = '✗ 网络错误: ' + e;
+            });
+        }
+        function saveEpgUrl() {
+            const url = document.getElementById('epgUrl').value.trim();
+            if (!url) { alert('请输入 EPG 地址'); return; }
+            fetch('/config/epg-url', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'epg_url=' + encodeURIComponent(url)
+            }).then(r => r.json()).then(d => {
+                const status = document.getElementById('epgStatus');
+                if (d.success) {
+                    status.className = 'status success';
+                    status.textContent = '✓ ' + d.message;
+                } else {
+                    status.className = 'status error';
+                    status.textContent = '✗ ' + d.message;
+                }
+            }).catch(e => {
+                document.getElementById('epgStatus').className = 'status error';
+                document.getElementById('epgStatus').textContent = '✗ 网络错误: ' + e;
+            });
+        }
+        function saveEpgPreference() {
+            const pref = document.getElementById('epgPreference').value;
+            fetch('/config/epg-preference', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'epg_preference=' + encodeURIComponent(pref)
+            }).then(r => r.json()).then(d => {
+                const status = document.getElementById('epgPrefStatus');
+                if (d.success) {
+                    status.className = 'status success';
+                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';
+                } else {
+                    status.className = 'status error';
+                    status.textContent = '✗ ' + d.message;
+                }
+            }).catch(e => {
+                document.getElementById('epgPrefStatus').className = 'status error';
+                document.getElementById('epgPrefStatus').textContent = '✗ 网络错误: ' + e;
+            });
+        }
+        function clearM3uFile() {
+            fetch('/config/m3u-file-clear', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'action=clear'
+            }).then(r => r.json()).then(d => {
+                const status = document.getElementById('m3uFileStatus');
+                if (d.success) {
+                    status.className = 'status success';
+                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';
+                    document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';
+                    document.getElementById('clearM3uFileBtn').style.display = 'none';
+                } else {
+                    status.className = 'status error';
+                    status.textContent = '✗ ' + d.message;
+                }
+            }).catch(e => {
+                document.getElementById('m3uFileStatus').className = 'status error';
+                document.getElementById('m3uFileStatus').textContent = '✗ 网络错误: ' + e;
+            });
+        }
+        function uploadM3uFile() {
+            const input = document.getElementById('m3uUploadInput');
+            if (!input.files || !input.files.length) { alert('请先选择文件'); return; }
+            const status = document.getElementById('uploadStatus');
+            status.className = 'status';
+            status.textContent = '上传中…';
+            status.style.display = 'block';
+            const form = new FormData();
+            form.append('file', input.files[0]);
+            fetch('/config/m3u-file-upload', {method: 'POST', body: form})
+                .then(r => r.json()).then(d => {
+                    status.className = 'status ' + (d.success ? 'success' : 'error');
+                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message + (d.success ? '（电视端已重新加载）' : '');
+                    if (d.success) {
+                        document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + input.files[0].name;
+                        document.getElementById('clearM3uFileBtn').style.display = 'block';
+                    }
+                }).catch(e => {
+                    status.className = 'status error';
+                    status.textContent = '✗ 上传失败: ' + e;
+                });
+        }
+        function saveChannels() {
+            const body = 'merge_same_name_channels=' + (document.getElementById('mergeSameName').checked ? '1' : '0');
+            fetch('/config/channels', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})
+                .then(r => r.json()).then(d => {
+                    const status = document.getElementById('channelsStatus');
+                    status.className = 'status ' + (d.success ? 'success' : 'error');
+                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message;
+                }).catch(e => {
+                    status.className = 'status error';
+                    status.textContent = '✗ 网络错误: ' + e;
+                });
+        }
+        function savePlayback() {
+            // Each endpoint gets only its own fields. Sending everything to both worked by
+            // accident (unknown keys were ignored) and hid mistakes: a renamed field simply
+            // stopped being saved, with no error anywhere.
+            const playback = 'video_render_mode=' + encodeURIComponent(document.getElementById('videoRenderMode').value)
+                + '&video_decode_mode=' + encodeURIComponent(document.getElementById('videoDecodeMode').value)
+                + '&video_tunneling=' + (document.getElementById('videoTunneling').checked ? '1' : '0');
+            const display = 'epg_display_enabled=' + encodeURIComponent(document.getElementById('epgDisplay').value)
+                + '&catchup_badge=' + encodeURIComponent(document.getElementById('catchupBadge').value)
+                + '&sidebar_opacity=' + encodeURIComponent(document.getElementById('sidebarOpacity').value);
+            Promise.all([
+                fetch('/config/playback', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: playback}),
+                fetch('/config/display', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: display})
+            ]).then(rs => Promise.all(rs.map(r => r.json()))).then(ds => {
+                const status = document.getElementById('playbackStatus');
+                const ok = ds.every(d => d.success);
+                status.className = 'status ' + (ok ? 'success' : 'error');
+                status.textContent = ok ? '✓ ' + ds[0].message : '✗ ' + (ds.find(d => !d.success) || {}).message;
+            }).catch(e => {
+                document.getElementById('playbackStatus').className = 'status error';
+                document.getElementById('playbackStatus').textContent = '✗ 网络错误: ' + e;
+            });
+        }
+        function saveUpdateSettings() {
+            const body = 'update_auto_check=' + (document.getElementById('updateAutoCheck').checked ? '1' : '0');
+            fetch('/config/update-settings', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})
+                .then(r => r.json()).then(d => {
+                    const status = document.getElementById('updateStatus');
+                    status.className = 'status ' + (d.success ? 'success' : 'error');
+                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message;
+                }).catch(e => console.error('保存更新设置失败:', e));
+        }
+        function updateStateText(d) {
+            const state = d.update_state || '';
+            if (state === 'checking') return '正在检查更新…';
+            if (state === 'up_to_date') return '已是最新版本';
+            if (state === 'update_available') return '发现新版本 ' + (d.update_latest_version || '');
+            if (state === 'downloading') return '电视正在下载… ' + (d.update_progress || 0) + '%';
+            if (state === 'ready') return '已下载并校验通过，等待在电视上确认安装';
+            if (state === 'installing') return '等待电视上的安装确认…';
+            if (state === 'needs_permission') return '电视需要先允许 LiteTV 安装更新（请在电视上打开设置）';
+            if (state === 'error') return '检查失败：' + updateErrorText(d.update_error);
+            return '尚未检查';
+        }
+        function updateErrorText(code) {
+            const errors = {NETWORK: '网络不可用', HTTP: '服务器错误', HTTP_NOT_FOUND: '该版本尚未发布更新信息', PARSE: '更新信息格式不可用', NO_BUILD_FOR_DEVICE: '没有适配电视 CPU 的安装包', CHECKSUM: '安装包校验失败，已删除', SIGNATURE: '安装包签名与应用不一致，已拒绝', STORAGE: '存储空间异常', INSTALL_BLOCKED: '系统阻止安装，需在电视上允许', INSTALL_FAILED: '安装失败', CANCELLED: '已取消下载', UNKNOWN: '未知错误'};
+            return errors[code] || code || '未知错误';
+        }
+        function renderUpdate(d) {
+            document.getElementById('appVersionInfo').textContent = '电视端版本: LiteTV ' + (d.app_version_name || '?') + ' (' + (d.app_version_code || 0) + ')' + (d.update_last_check_ms ? '，上次检查 ' + new Date(d.update_last_check_ms).toLocaleString() : '，从未检查');
+            document.getElementById('updateStateInfo').textContent = updateStateText(d);
+            const changelog = d.update_changelog || [];
+            document.getElementById('updateChangelog').textContent = changelog.length ? ('更新内容：\
+· ' + changelog.join('\
+· ')) : '';
+        }
+        function checkUpdate() {
+            const status = document.getElementById('updateStatus');
+            status.className = 'status success';
+            status.textContent = '正在让电视检查更新…';
+            fetch('/config/update-check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'action=check'})
+                .then(r => r.json()).then(d => {
+                    renderUpdate(d);
+                    status.className = 'status ' + (d.success ? 'success' : 'error');
+                    status.textContent = (d.success ? '✓ ' : '✗ ') + updateStateText(d);
+                }).catch(e => {
+                    status.className = 'status error';
+                    status.textContent = '✗ 无法让电视检查更新: ' + e;
+                });
+        }
+        function installUpdate() {
+            const status = document.getElementById('updateStatus');
+            if (!confirm('将在电视上下载并校验安装包，然后需要有人在电视上确认安装。继续？')) return;
+            fetch('/config/update-install', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'action=install'})
+                .then(r => r.json()).then(d => {
+                    if (!d.success) {
+                        status.className = 'status error';
+                        status.textContent = '✗ ' + d.message;
+                        return;
+                    }
+                    status.className = 'status success';
+                    status.textContent = '✓ ' + d.message;
+                    pollUpdate(0);
+                }).catch(e => {
+                    status.className = 'status error';
+                    status.textContent = '✗ 无法触发更新: ' + e;
+                });
+        }
+        function pollUpdate(attempt) {
+            if (attempt > 40) return;
+            fetch('/config/get').then(r => r.json()).then(d => {
+                renderUpdate(d);
+                const status = document.getElementById('updateStatus');
+                status.className = 'status ' + (d.update_state === 'error' ? 'error' : 'success');
+                status.textContent = updateStateText(d);
+                const state = d.update_state || '';
+                if (state === 'downloading' || state === 'checking' || state === 'ready') {
+                    setTimeout(() => pollUpdate(attempt + 1), 1500);
+                }
+            }).catch(e => console.error('轮询更新状态失败:', e));
+        }
+        window.onload = function() {
+            fetch('/config/get').then(r => r.json()).then(d => {
+                document.getElementById('m3uUrl').value = d.m3u_url || '';
+                document.getElementById('epgUrl').value = d.epg_url || '';
+                document.getElementById('epgPreference').value = d.epg_preference || 'auto';
+                document.getElementById('videoRenderMode').value = d.video_render_mode || 'surface';
+                document.getElementById('videoDecodeMode').value = d.video_decode_mode || 'auto';
+                document.getElementById('videoTunneling').checked = !!d.video_tunneling;
+                document.getElementById('epgDisplay').value = d.epg_display_enabled === false ? '0' : '1';
+                document.getElementById('catchupBadge').value = d.catchup_badge === false ? '0' : '1';
+                document.getElementById('sidebarOpacity').value = String(d.sidebar_opacity == null ? 0 : d.sidebar_opacity);
+                const m3uFile = d.m3u_file_path || '';
+                const dropDir = d.m3u_drop_dir || '';
+                if (dropDir) {
+                    document.getElementById('m3uDropDirInfo').textContent = '也可把 .m3u 文件放到电视上：' + dropDir + '，再在电视设置里点「从文件夹导入」';
+                }
+                if (m3uFile) {
+                    document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + m3uFile;
+                    document.getElementById('clearM3uFileBtn').style.display = 'block';
+                } else {
+                    document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';
+                }
+                const m3uUrls = d.m3u_epg_urls || [];
+                document.getElementById('epgM3uInfo').textContent = m3uUrls.length
+                    ? 'M3U 内置 EPG: ' + m3uUrls.join(' | ')
+                    : '当前 M3U 未提供内置 EPG';
+                const active = d.active_epg_url || '';
+                document.getElementById('epgActiveInfo').textContent = active
+                    ? '当前生效 EPG: ' + active
+                    : '当前无生效 EPG 来源';
+                document.getElementById('mergeSameName').checked = d.merge_same_name_channels !== false;
+                document.getElementById('updateAutoCheck').checked = d.update_auto_check !== false;
+                renderUpdate(d);
+            }).catch(e => console.error('加载配置失败:', e));
+        };
+        document.getElementById('updateAutoCheck').addEventListener('change', saveUpdateSettings);
+    </script>
+</body>
+</html>

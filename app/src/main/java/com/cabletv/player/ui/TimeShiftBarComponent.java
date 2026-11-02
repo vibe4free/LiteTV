@@ -279,14 +279,42 @@ public class TimeShiftBarComponent extends FrameLayout {
         return mAutoHidePending;
     }
 
-    /** @return layout params that anchor this bar just above the playback info strip. */
+    /**
+     * @return layout params that anchor this bar just above the playback info strip, or flat
+     *         against the bottom edge on a screen too short for both.
+     */
     public FrameLayout.LayoutParams createBottomLayoutParams() {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 dp2px(BAR_HEIGHT_DP));
         lp.gravity = Gravity.BOTTOM;
-        lp.bottomMargin = dp2px(100); // PlaybackInfoComponent is 100dp tall
+        lp.bottomMargin = dp2px(bottomMarginDp(screenHeightDp()));
         return lp;
+    }
+
+    /** How much room the strip above the playback info strip needs, in dp. */
+    private static final int INFO_BAR_HEIGHT_DP = 100;
+    /** Space left under the bar when it has to sit on top of the info strip. */
+    private static final int COMPACT_MARGIN_DP = 8;
+    /** A little air so the two strips never touch. */
+    private static final int MIN_GAP_DP = 24;
+
+    private int screenHeightDp() {
+        android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+        return m.heightPixels == 0 ? 0 : Math.round(m.heightPixels / m.density);
+    }
+
+    /**
+     * Where the bar sits from the bottom edge.
+     *
+     * <p>Normally it clears the info strip. On a short screen (a phone held sideways) the two
+     * strips together are taller than the display, and the old fixed 100dp margin pushed the
+     * whole bar off the top: the viewer tapped the picture and no progress control appeared.
+     * There the bar wins and covers the info strip -- moving the playhead matters more.
+     */
+    static int bottomMarginDp(int screenHeightDp) {
+        int needed = BAR_HEIGHT_DP + INFO_BAR_HEIGHT_DP + MIN_GAP_DP;
+        return screenHeightDp >= needed ? INFO_BAR_HEIGHT_DP : COMPACT_MARGIN_DP;
     }
 
     public void setOnSeekListener(@Nullable OnSeekListener listener) {
@@ -300,6 +328,11 @@ public class TimeShiftBarComponent extends FrameLayout {
         mPositionMs = Math.max(windowStartMs, Math.min(mWindowEndMs, positionMs));
         mTimeline.setWindow(mWindowStartMs, mWindowEndMs, mPositionMs);
         updateLabels();
+    }
+
+    /** Whether the playhead has moved past the last programme the track knows about. */
+    public boolean isPastLastProgramme() {
+        return mTimeline.isPastLastSegment();
     }
 
     /**

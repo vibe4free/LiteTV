@@ -100,6 +100,22 @@ public class TimeShiftBarComponentTest {
                 15_000L, committed.get());
     }
 
+    /**
+     * A phone held sideways is only ~160dp tall. The bar plus the info strip came to 188dp, so a
+     * fixed 100dp margin pushed the bar off the top of the screen and tapping the picture showed
+     * no progress control at all.
+     */
+    @Test
+    public void theBarStaysOnScreenOnShortDisplays() {
+        assertEquals("phones: sit on the bottom edge, covering the info strip",
+                8, TimeShiftBarComponent.bottomMarginDp(160));
+        assertEquals("televisions keep the normal gap above the info strip",
+                100, TimeShiftBarComponent.bottomMarginDp(540));
+        // Exactly enough room still means the comfortable layout.
+        assertEquals(100, TimeShiftBarComponent.bottomMarginDp(88 + 100 + 24));
+        assertEquals(8, TimeShiftBarComponent.bottomMarginDp(88 + 100 + 24 - 1));
+    }
+
     @Test
     public void backToLive_string_isLocalized() {
         Context context = RuntimeEnvironment.getApplication();

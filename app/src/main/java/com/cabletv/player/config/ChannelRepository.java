@@ -341,15 +341,28 @@ public class ChannelRepository {
     }
 
     public int getCurrentChannelIndex(String currentUrl) {
-        if (TextUtils.isEmpty(currentUrl)) {
-            return 0;
+        int index = findChannelIndex(currentUrl);
+        return index >= 0 ? index : 0;
+    }
+
+    /**
+     * Where the channel playing {@code url} sits in the flat list.
+     *
+     * <p>-1 means "not in this playlist", which {@link #getCurrentChannelIndex} cannot express:
+     * it answers 0 both for the first channel and for a channel that is gone. Reloading a
+     * playlist needs that distinction, or a channel that survived the reload would be confused
+     * with a missing one.
+     */
+    public int findChannelIndex(String url) {
+        if (TextUtils.isEmpty(url)) {
+            return -1;
         }
         List<Channel> all = mFlatChannels;
         for (int i = 0; i < all.size(); i++) {
-            if (all.get(i).hasUrl(currentUrl)) {
+            if (all.get(i).hasUrl(url)) {
                 return i;
             }
         }
-        return 0;
+        return -1;
     }
 }

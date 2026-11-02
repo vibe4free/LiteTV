@@ -36,24 +36,7 @@ import java.util.regex.Pattern;
 public class ConfigWebServer {
     private static final String TAG = "ConfigWebServer";
 
-    /** Request line cap; a legitimate config request is a few dozen bytes. */
-    private static final int MAX_REQUEST_LINE_BYTES = 2048;
-    /** Header count cap, guards against a client that never sends a blank line. */
-    private static final int MAX_HEADER_LINES = 64;
-    /** Body cap; the only bodies we accept are two short form fields. */
-    private static final int MAX_BODY_BYTES = 64 * 1024;
-    /** Playlist uploads are bounded by the same 8 MB ceiling ChannelRepository enforces. */
-    private static final int MAX_UPLOAD_BYTES = 8 * 1024 * 1024 + 64 * 1024;
     private static final String UPLOAD_PATH = "/config/m3u-file-upload";
-    /**
-     * A client that connects but never sends a request head must release its worker
-     * quickly, otherwise a handful of idle sockets makes the server unavailable.
-     */
-    private static final int HEAD_TIMEOUT_MS = 3_000;
-    /** Once a valid head has arrived, allow a slower body transfer. */
-    private static final int BODY_TIMEOUT_MS = 10_000;
-    /** A playlist upload over Wi-Fi can be several MB, so it gets its own budget. */
-    private static final int UPLOAD_TIMEOUT_MS = 60_000;
     /** Bounded worker pool, so many connections cannot exhaust threads. */
     private static final int MAX_WORKERS = 8;
 
@@ -62,15 +45,16 @@ public class ConfigWebServer {
     private static ExecutorService sWorkers;
     private static volatile boolean sRunning = false;
 
+    /**
+     * Told when the page changes something that is not a plain setting.
+     *
+     * <p>Settings themselves are announced by {@code AppConfig}, which notifies every write; the
+     * web page used to duplicate that with one callback per setting, so a single save could
+     * reload the playlist twice.
+     */
     public interface OnConfigChangeListener {
-        void onM3uUrlChanged(String newUrl);
-        void onEpgUrlChanged(String newUrl);
-        void onEpgPreferenceChanged(String preference);
-        /** The local playlist was cleared (newPath is empty) from the web page. */
+        /** The local playlist file was replaced or removed from the web page. */
         void onM3uFileChanged(String newPath);
-
-        /** A display preference changed; the picture has to follow without a restart. */
-        void onDisplaySettingsChanged();
     }
 
     /** Cleared by the Activity in onDestroy(); volatile because server threads read it. */
@@ -160,70 +144,19 @@ public class ConfigWebServer {
 
     private static void handleClient(Socket socket) {
         try {
-            socket.setSoTimeout(HEAD_TIMEOUT_MS);
-            InputStream in = socket.getInputStream();
-
-            String requestLine = readLine(in, MAX_REQUEST_LINE_BYTES);
-            if (requestLine == null || requestLine.isEmpty()) {
+            HttpRequest request;
+            try {
+                request = HttpRequest.read(socket, UPLOAD_PATH);
+            } catch (HttpRequest.HttpError e) {
+                Log.w(TAG, "Rejected request: " + e.getMessage());
+                sendResponse(socket, statusText(e.status), e.status, "text/plain");
                 return;
             }
+            String method = request.method;
+            String path = request.path;
+            byte[] rawBody = request.body;
+            String body = request.bodyText();
 
-            String[] parts = requestLine.split(" ");
-            if (parts.length < 2) {
-                sendResponse(socket, "400 Bad Request", 400, "text/plain");
-                return;
-            }
-            String method = parts[0];
-            String path = parts[1];
-
-            // Read headers
-            int contentLength = 0;
-            String origin = null;
-            String host = null;
-            String requestContentType = "";
-            for (int i = 0; i < MAX_HEADER_LINES; i++) {
-                String line = readLine(in, MAX_REQUEST_LINE_BYTES);
-                if (line == null || line.isEmpty()) break;
-                String lower = line.toLowerCase();
-                if (lower.startsWith("content-length:")) {
-                    contentLength = parseContentLength(line.substring("content-length:".length()));
-                    if (contentLength < 0) {
-                        sendResponse(socket, "400 Bad Request", 400, "text/plain");
-                        return;
-                    }
-                    if (contentLength > bodyLimitFor(path)) {
-                        sendResponse(socket, "413 Payload Too Large", 413, "text/plain");
-                        return;
-                    }
-                } else if (lower.startsWith("origin:")) {
-                    origin = line.substring("origin:".length()).trim();
-                } else if (lower.startsWith("host:")) {
-                    host = line.substring("host:".length()).trim();
-                } else if (lower.startsWith("content-type:")) {
-                    // Keep the original case: the multipart boundary is case-sensitive even though
-                    // the header name and parameters are not.
-                    requestContentType = line.substring("content-type:".length()).trim();
-                }
-            }
-
-            // Read body (exact byte count). Kept as bytes because a multipart upload can hold
-            // content that is not valid UTF-8; the text form is decoded only when needed.
-            byte[] rawBody = null;
-            if (contentLength > 0) {
-                socket.setSoTimeout(UPLOAD_PATH.equals(path) ? UPLOAD_TIMEOUT_MS : BODY_TIMEOUT_MS);
-                rawBody = new byte[contentLength];
-                int off = 0;
-                while (off < contentLength) {
-                    int n = in.read(rawBody, off, contentLength - off);
-                    if (n == -1) break;
-                    off += n;
-                }
-                if (off < contentLength) {
-                    sendResponse(socket, "400 Bad Request", 400, "text/plain");
-                    return;
-                }
-            }
-            String body = rawBody == null ? "" : new String(rawBody, "UTF-8");
 
             if ("POST".equals(method)) {
                 // The server has no authentication, so it must at least refuse
@@ -231,12 +164,12 @@ public class ConfigWebServer {
                 // otherwise silently repoint the playlist. Browsers send Origin on
                 // cross-site POSTs; local tools (curl and the page we serve) do not
                 // trip this check.
-                if (isCrossSite(origin, host)) {
-                    Log.w(TAG, "Rejected cross-site POST from origin: " + origin);
+                if (isCrossSite(request.origin, request.host)) {
+                    Log.w(TAG, "Rejected cross-site POST from origin: " + request.origin);
                     sendResponse(socket, "403 Forbidden", 403, "text/plain");
                     return;
                 }
-                String requestType = requestContentType.toLowerCase();
+                String requestType = request.contentType.toLowerCase(java.util.Locale.US);
                 if (!requestType.startsWith("application/x-www-form-urlencoded")
                         && !(UPLOAD_PATH.equals(path)
                         && requestType.startsWith("multipart/form-data"))) {
@@ -284,7 +217,7 @@ public class ConfigWebServer {
                 response = handleUpdateInstallPost();
                 contentType = "application/json";
             } else if ("POST".equals(method) && UPLOAD_PATH.equals(path)) {
-                response = handleM3uFileUpload(rawBody, requestContentType);
+                response = handleM3uFileUpload(rawBody, request.contentType);
                 contentType = "application/json";
             } else {
                 sendResponse(socket, "404 Not Found", 404, "text/plain");
@@ -302,42 +235,8 @@ public class ConfigWebServer {
         }
     }
 
-    /**
-     * Reads one CRLF-terminated line, capped at maxBytes. Returns null at end of stream.
-     */
-    private static String readLine(InputStream in, int maxBytes) throws IOException {
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        int b;
-        while ((b = in.read()) != -1) {
-            if (b == '\n') {
-                return new String(buffer.toByteArray(), "UTF-8");
-            }
-            if (b == '\r') {
-                continue;
-            }
-            if (buffer.size() >= maxBytes) {
-                throw new IOException("Header line exceeds " + maxBytes + " bytes");
-            }
-            buffer.write(b);
-        }
-        return buffer.size() == 0 ? null : new String(buffer.toByteArray(), "UTF-8");
-    }
 
-    private static int parseContentLength(String value) {
-        try {
-            long length = Long.parseLong(value.trim());
-            if (length < 0) return -1;
-            // Clamp instead of overflowing; caller rejects anything over the cap.
-            return length > MAX_UPLOAD_BYTES ? MAX_UPLOAD_BYTES + 1 : (int) length;
-        } catch (NumberFormatException e) {
-            return -1;
-        }
-    }
 
-    /** Playlist uploads may be several MB; every other request stays tiny. */
-    private static int bodyLimitFor(String path) {
-        return UPLOAD_PATH.equals(path) ? MAX_UPLOAD_BYTES : MAX_BODY_BYTES;
-    }
 
     /**
      * True when the request carries an Origin that is not this server itself.
@@ -393,10 +292,6 @@ public class ConfigWebServer {
             String m3uUrl = params.get("m3u_url");
             if (m3uUrl != null && !m3uUrl.isEmpty()) {
                 AppConfig.setM3uUrl(m3uUrl);
-                OnConfigChangeListener listener = sConfigChangeListener;
-                if (listener != null) {
-                    listener.onM3uUrlChanged(m3uUrl);
-                }
                 JsonObject json = new JsonObject();
                 json.addProperty("success", true);
                 json.addProperty("message", "M3U URL saved");
@@ -417,10 +312,6 @@ public class ConfigWebServer {
             String epgUrl = params.get("epg_url");
             if (epgUrl != null && !epgUrl.isEmpty()) {
                 AppConfig.setEpgUrl(epgUrl);
-                OnConfigChangeListener listener = sConfigChangeListener;
-                if (listener != null) {
-                    listener.onEpgUrlChanged(epgUrl);
-                }
                 JsonObject json = new JsonObject();
                 json.addProperty("success", true);
                 json.addProperty("message", "EPG URL saved");
@@ -443,10 +334,6 @@ public class ConfigWebServer {
                     || AppConfig.EPG_PREFERENCE_M3U.equals(preference)
                     || AppConfig.EPG_PREFERENCE_USER.equals(preference))) {
                 AppConfig.setEpgPreference(preference);
-                OnConfigChangeListener listener = sConfigChangeListener;
-                if (listener != null) {
-                    listener.onEpgPreferenceChanged(preference);
-                }
                 JsonObject json = new JsonObject();
                 json.addProperty("success", true);
                 json.addProperty("message", "EPG priority saved");
@@ -470,10 +357,6 @@ public class ConfigWebServer {
                 new File(path).delete();
             }
             AppConfig.setM3uFilePath("");
-            OnConfigChangeListener listener = sConfigChangeListener;
-            if (listener != null) {
-                listener.onM3uFileChanged("");
-            }
             JsonObject json = new JsonObject();
             json.addProperty("success", true);
             json.addProperty("message", "Local M3U file removed");
@@ -487,7 +370,8 @@ public class ConfigWebServer {
         return json.toString();
     }
 
-    private static String getConfigJson() {
+    /** Package-visible so the contract test can check it against the page. */
+    static String getConfigJson() {
         JsonObject config = new JsonObject();
         config.addProperty("m3u_url", AppConfig.getM3uUrl());
         config.addProperty("m3u_file_path", AppConfig.getM3uFilePath());
@@ -687,15 +571,6 @@ public class ConfigWebServer {
             if (catchupBadge != null) {
                 AppConfig.setCatchupBadgeEnabled("1".equals(catchupBadge));
             }
-            OnConfigChangeListener listener = sConfigChangeListener;
-            if (listener != null) {
-                try {
-                    listener.onDisplaySettingsChanged();
-                } catch (RuntimeException e) {
-                    // The page's answer must not depend on the player being alive.
-                    Log.w(TAG, "Display change listener threw", e);
-                }
-            }
             return jsonResult(true, "Display settings saved");
         } catch (Exception e) {
             Log.e(TAG, "Error saving display settings", e);
@@ -893,380 +768,37 @@ public class ConfigWebServer {
         return params;
     }
 
+    /** The page ships in the APK and never changes, so it is read once and kept. */
+    private static volatile String sIndexHtml;
+
     private static String getIndexHtml() {
-        return "<!DOCTYPE html>\n" +
-                "<html lang=\"zh-CN\">\n" +
-                "<head>\n" +
-                "    <meta charset=\"UTF-8\">\n" +
-                "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
-                "    <title>LiteTV 配置</title>\n" +
-                "    <style>\n" +
-                "        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; margin: 0; padding: 20px; }\n" +
-                "        .container { max-width: 700px; margin: 0 auto; }\n" +
-                "        h1 { color: #FF6B35; margin-bottom: 30px; text-align: center; }\n" +
-                "        .section { background-color: #2a2a2a; border-left: 4px solid #FF6B35; border-radius: 4px; padding: 20px; margin-bottom: 20px; }\n" +
-                "        .section h2 { color: #FF6B35; margin-top: 0; font-size: 18px; }\n" +
-                "        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }\n" +
-                "        input[type=\"text\"], input[type=\"url\"], textarea { width: 100%; padding: 10px; margin-bottom: 12px; background-color: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 4px; box-sizing: border-box; font-size: 14px; }\n" +
-                "        input[type=\"text\"]:focus, input[type=\"url\"]:focus, textarea:focus { outline: none; border-color: #FF6B35; }\n" +
-                "        button { background-color: #FF6B35; color: #fff; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background-color 0.3s; }\n" +
-                "        button:hover { background-color: #ff7d52; }\n" +
-                "        .info { font-size: 12px; color: #aaa; margin-top: 8px; line-height: 1.5; }\n" +
-                "        .status { padding: 10px; border-radius: 4px; margin-top: 8px; font-size: 12px; display: none; }\n" +
-                "        .status.success { background-color: #2d5a2d; color: #90EE90; display: block; }\n" +
-                "        .status.error { background-color: #5a2d2d; color: #FF6B6B; display: block; }\n" +
-                "    </style>\n" +
-                "</head>\n" +
-                "<body>\n" +
-                "    <div class=\"container\">\n" +
-                "        <h1>📺 LiteTV 配置</h1>\n" +
-                "        \n" +
-                "        <div class=\"section\">\n" +
-                "            <h2>M3U 播放列表</h2>\n" +
-                "            <label for=\"m3uUrl\">播放列表 URL:</label>\n" +
-                "            <input type=\"url\" id=\"m3uUrl\" placeholder=\"http://example.com/playlist.m3u\">\n" +
-                "            <div class=\"info\">输入 M3U 播放列表的完整 URL，例如: http://example.com/playlist.m3u</div>\n" +
-                "            <button onclick=\"saveM3uUrl()\">保存 M3U URL</button>\n" +
-                "            <div id=\"m3uStatus\" class=\"status\"></div>\n" +
-                "            <div id=\"m3uFileInfo\" class=\"info\"></div>\n" +
-                "            <div id=\"m3uDropDirInfo\" class=\"info\"></div>\n" +
-                "            <label for=\"m3uUploadInput\" style=\"margin-top:12px;\">从本机上传 M3U 文件（手机 / 电脑选择）:</label>\n" +
-                "            <input type=\"file\" id=\"m3uUploadInput\" accept=\".m3u,.m3u8,.txt,text/plain\" style=\"margin-bottom:12px;\">\n" +
-                "            <button onclick=\"uploadM3uFile()\">上传并启用</button>\n" +
-                "            <div id=\"uploadStatus\" class=\"status\"></div>\n" +
-                "            <button id=\"clearM3uFileBtn\" onclick=\"clearM3uFile()\" style=\"display:none;\">清除本地文件</button>\n" +
-                "            <div id=\"m3uFileStatus\" class=\"status\"></div>\n" +
-                "            <label style=\"display:flex;align-items:center;gap:8px;margin:12px 0;\">\n" +
-                "                <input type=\"checkbox\" id=\"mergeSameName\"> 合并同名频道（同一频道多个源合成一个）\n" +
-                "            </label>\n" +
-                "            <button onclick=\"saveChannels()\">保存频道设置</button>\n" +
-                "            <div id=\"channelsStatus\" class=\"status\"></div>\n" +
-                "            <div class=\"info\">订阅链接常把同一频道按不同源重复列出；开启后合并为一个频道并依次尝试各个源（播放界面按 R 或双击可手动切换源）。列表本身没有重复时无任何影响。</div>\n" +
-                "        </div>\n" +
-                "        \n" +
-                "        <div class=\"section\">\n" +
-                "            <h2>EPG 电子节目单</h2>\n" +
-                "            <label for=\"epgUrl\">EPG 地址模板:</label>\n" +
-                "            <input type=\"url\" id=\"epgUrl\" placeholder=\"http://epg.example.com/api/diyp?ch={name}&date={date}\">\n" +
-                "            <div class=\"info\">支持 {name} 和 {date} 占位符，例如: http://epg.example.com/api/diyp?ch={name}&date={date}</div>\n" +
-                "            <button onclick=\"saveEpgUrl()\">保存 EPG 地址</button>\n" +
-                "            <div id=\"epgStatus\" class=\"status\"></div>\n" +
-                "            <label for=\"epgPreference\" style=\"margin-top:16px;\">EPG 来源优先级:</label>\n" +
-                "            <select id=\"epgPreference\" style=\"width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
-                "                <option value=\"auto\">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</option>\n" +
-                "                <option value=\"m3u\">优先使用 M3U 内置 EPG</option>\n" +
-                "                <option value=\"user\">仅使用我设置的 EPG</option>\n" +
-                "            </select>\n" +
-                "            <button onclick=\"saveEpgPreference()\">保存优先级</button>\n" +
-                "            <div id=\"epgPrefStatus\" class=\"status\"></div>\n" +
-                "            <div id=\"epgM3uInfo\" class=\"info\"></div>\n" +
-                "            <div id=\"epgActiveInfo\" class=\"info\"></div>\n" +
-                "        </div>\n" +
-                "        \n" +
-                "        <div class=\"section\">\n" +
-                "            <h2>播放与显示</h2>\n" +
-                "            <label for=\"videoRenderMode\">画面输出方式:</label>\n" +
-                "            <select id=\"videoRenderMode\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
-                "                <option value=\"surface\">SurfaceView（推荐，画面更清晰）</option>\n" +
-                "                <option value=\"texture\">TextureView（兼容备用）</option>\n" +
-                "            </select>\n" +
-                "            <label for=\"videoDecodeMode\">解码方式:</label>\n" +
-                "            <select id=\"videoDecodeMode\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
-                "                <option value=\"auto\">自动（优先硬件，失败回退软件）</option>\n" +
-                "                <option value=\"hardware\">仅硬件解码</option>\n" +
-                "                <option value=\"software\">优先软件解码（可解决个别频道打不开）</option>\n" +
-                "            </select>\n" +
-                "            <label style=\"display:flex;align-items:center;gap:8px;margin-bottom:12px;\">\n" +
-                "                <input type=\"checkbox\" id=\"videoTunneling\"> 视频直通显示（实验，部分电视画面更流畅）\n" +
-                "            </label>\n" +
-                "            <label for=\"epgDisplay\">频道列表显示节目单:</label>\n" +
-                "            <select id=\"epgDisplay\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
-                "                <option value=\"1\">显示</option>\n" +
-                "                <option value=\"0\">不显示</option>\n" +
-                "            </select>\n" +
-                "            <label for=\"catchupBadge\">回看时显示回放标记:</label>\n" +
-                "            <select id=\"catchupBadge\" style=\"width:100%;padding:10px;margin-bottom:8px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
-                "                <option value=\"1\">显示（默认）</option>\n" +
-                "                <option value=\"0\">不显示</option>\n" +
-                "            </select>\n" +
-                "            <label for=\"sidebarOpacity\">频道列表背景:</label>\n" +
-                "            <select id=\"sidebarOpacity\" style=\"width:100%;padding:10px;margin-bottom:12px;background-color:#1a1a1a;color:#fff;border:1px solid #444;border-radius:4px;font-size:14px;\">\n" +
-                "                <option value=\"0\">半透明（默认）</option>\n" +
-                "                <option value=\"1\">半不透明</option>\n" +
-                "                <option value=\"2\">不透明</option>\n" +
-                "            </select>\n" +
-                "            <button onclick=\"savePlayback()\">保存播放设置</button>\n" +
-                "            <div id=\"playbackStatus\" class=\"status\"></div>\n" +
-                "            <div class=\"info\">播放设置需重启电视端应用后生效；显示设置下次打开频道列表时生效。</div>\n" +
-                "        </div>\n" +
-                "        \n" +
-                "        <div class=\"section\">\n" +
-                "            <h2>关于 / 更新</h2>\n" +
-                "            <div id=\"appVersionInfo\" class=\"info\"></div>\n" +
-                "            <label style=\"display:flex;align-items:center;gap:8px;margin:12px 0;\">\n" +
-                "                <input type=\"checkbox\" id=\"updateAutoCheck\"> 自动检查更新（每天最多一次）\n" +
-                "            </label>\n" +
-                "            <div id=\"updateStateInfo\" class=\"info\"></div>\n" +
-                "            <div id=\"updateChangelog\" class=\"info\" style=\"white-space:pre-line;\"></div>\n" +
-                "            <button onclick=\"checkUpdate()\">检查更新</button>\n" +
-                "            <button onclick=\"installUpdate()\" id=\"updateInstallBtn\" style=\"margin-left:8px;\">立即更新</button>\n" +
-                "            <div id=\"updateStatus\" class=\"status\"></div>\n" +
-                "            <div class=\"info\">「立即更新」会让电视自动下载并校验安装包，然后在电视上弹出系统安装确认——安装需要有人在电视旁按确认。</div>\n" +
-                "        </div>\n" +
-                "    </div>\n" +
-                "    <script>\n" +
-                "        function saveM3uUrl() {\n" +
-                "            const url = document.getElementById('m3uUrl').value.trim();\n" +
-                "            if (!url) { alert('请输入 M3U URL'); return; }\n" +
-                "            fetch('/config/m3u-url', {\n" +
-                "                method: 'POST',\n" +
-                "                headers: {'Content-Type': 'application/x-www-form-urlencoded'},\n" +
-                "                body: 'm3u_url=' + encodeURIComponent(url)\n" +
-                "            }).then(r => r.json()).then(d => {\n" +
-                "                const status = document.getElementById('m3uStatus');\n" +
-                "                if (d.success) {\n" +
-                "                    status.className = 'status success';\n" +
-                "                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';\n" +
-                "                } else {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ ' + d.message;\n" +
-                "                }\n" +
-                "            }).catch(e => {\n" +
-                "                document.getElementById('m3uStatus').className = 'status error';\n" +
-                "                document.getElementById('m3uStatus').textContent = '✗ 网络错误: ' + e;\n" +
-                "            });\n" +
-                "        }\n" +
-                "        function saveEpgUrl() {\n" +
-                "            const url = document.getElementById('epgUrl').value.trim();\n" +
-                "            if (!url) { alert('请输入 EPG 地址'); return; }\n" +
-                "            fetch('/config/epg-url', {\n" +
-                "                method: 'POST',\n" +
-                "                headers: {'Content-Type': 'application/x-www-form-urlencoded'},\n" +
-                "                body: 'epg_url=' + encodeURIComponent(url)\n" +
-                "            }).then(r => r.json()).then(d => {\n" +
-                "                const status = document.getElementById('epgStatus');\n" +
-                "                if (d.success) {\n" +
-                "                    status.className = 'status success';\n" +
-                "                    status.textContent = '✓ ' + d.message;\n" +
-                "                } else {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ ' + d.message;\n" +
-                "                }\n" +
-                "            }).catch(e => {\n" +
-                "                document.getElementById('epgStatus').className = 'status error';\n" +
-                "                document.getElementById('epgStatus').textContent = '✗ 网络错误: ' + e;\n" +
-                "            });\n" +
-                "        }\n" +
-                "        function saveEpgPreference() {\n" +
-                "            const pref = document.getElementById('epgPreference').value;\n" +
-                "            fetch('/config/epg-preference', {\n" +
-                "                method: 'POST',\n" +
-                "                headers: {'Content-Type': 'application/x-www-form-urlencoded'},\n" +
-                "                body: 'epg_preference=' + encodeURIComponent(pref)\n" +
-                "            }).then(r => r.json()).then(d => {\n" +
-                "                const status = document.getElementById('epgPrefStatus');\n" +
-                "                if (d.success) {\n" +
-                "                    status.className = 'status success';\n" +
-                "                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';\n" +
-                "                } else {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ ' + d.message;\n" +
-                "                }\n" +
-                "            }).catch(e => {\n" +
-                "                document.getElementById('epgPrefStatus').className = 'status error';\n" +
-                "                document.getElementById('epgPrefStatus').textContent = '✗ 网络错误: ' + e;\n" +
-                "            });\n" +
-                "        }\n" +
-                "        function clearM3uFile() {\n" +
-                "            fetch('/config/m3u-file-clear', {\n" +
-                "                method: 'POST',\n" +
-                "                headers: {'Content-Type': 'application/x-www-form-urlencoded'},\n" +
-                "                body: 'action=clear'\n" +
-                "            }).then(r => r.json()).then(d => {\n" +
-                "                const status = document.getElementById('m3uFileStatus');\n" +
-                "                if (d.success) {\n" +
-                "                    status.className = 'status success';\n" +
-                "                    status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';\n" +
-                "                    document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';\n" +
-                "                    document.getElementById('clearM3uFileBtn').style.display = 'none';\n" +
-                "                } else {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ ' + d.message;\n" +
-                "                }\n" +
-                "            }).catch(e => {\n" +
-                "                document.getElementById('m3uFileStatus').className = 'status error';\n" +
-                "                document.getElementById('m3uFileStatus').textContent = '✗ 网络错误: ' + e;\n" +
-                "            });\n" +
-                "        }\n" +
-                "        function uploadM3uFile() {\n" +
-                "            const input = document.getElementById('m3uUploadInput');\n" +
-                "            if (!input.files || !input.files.length) { alert('请先选择文件'); return; }\n" +
-                "            const status = document.getElementById('uploadStatus');\n" +
-                "            status.className = 'status';\n" +
-                "            status.textContent = '上传中…';\n" +
-                "            status.style.display = 'block';\n" +
-                "            const form = new FormData();\n" +
-                "            form.append('file', input.files[0]);\n" +
-                "            fetch('/config/m3u-file-upload', {method: 'POST', body: form})\n" +
-                "                .then(r => r.json()).then(d => {\n" +
-                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
-                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message + (d.success ? '（电视端已重新加载）' : '');\n" +
-                "                    if (d.success) {\n" +
-                "                        document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + input.files[0].name;\n" +
-                "                        document.getElementById('clearM3uFileBtn').style.display = 'block';\n" +
-                "                    }\n" +
-                "                }).catch(e => {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ 上传失败: ' + e;\n" +
-                "                });\n" +
-                "        }\n" +
-                "        function saveChannels() {\n" +
-                "            const body = 'merge_same_name_channels=' + (document.getElementById('mergeSameName').checked ? '1' : '0');\n" +
-                "            fetch('/config/channels', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})\n" +
-                "                .then(r => r.json()).then(d => {\n" +
-                "                    const status = document.getElementById('channelsStatus');\n" +
-                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
-                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message;\n" +
-                "                }).catch(e => {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ 网络错误: ' + e;\n" +
-                "                });\n" +
-                "        }\n" +
-                "        function savePlayback() {\n" +
-                "            const body = 'video_render_mode=' + encodeURIComponent(document.getElementById('videoRenderMode').value)\n" +
-                "                + '&video_decode_mode=' + encodeURIComponent(document.getElementById('videoDecodeMode').value)\n" +
-                "                + '&video_tunneling=' + (document.getElementById('videoTunneling').checked ? '1' : '0')\n" +
-                "                + '&epg_display_enabled=' + encodeURIComponent(document.getElementById('epgDisplay').value)\n" +
-                "                + '&catchup_badge=' + encodeURIComponent(document.getElementById('catchupBadge').value)\n" +
-                "                + '&sidebar_opacity=' + encodeURIComponent(document.getElementById('sidebarOpacity').value);\n" +
-                "            Promise.all([\n" +
-                "                fetch('/config/playback', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body}),\n" +
-                "                fetch('/config/display', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})\n" +
-                "            ]).then(rs => Promise.all(rs.map(r => r.json()))).then(ds => {\n" +
-                "                const status = document.getElementById('playbackStatus');\n" +
-                "                const ok = ds.every(d => d.success);\n" +
-                "                status.className = 'status ' + (ok ? 'success' : 'error');\n" +
-                "                status.textContent = ok ? '✓ ' + ds[0].message : '✗ ' + (ds.find(d => !d.success) || {}).message;\n" +
-                "            }).catch(e => {\n" +
-                "                document.getElementById('playbackStatus').className = 'status error';\n" +
-                "                document.getElementById('playbackStatus').textContent = '✗ 网络错误: ' + e;\n" +
-                "            });\n" +
-                "        }\n" +
-                "        function saveUpdateSettings() {\n" +
-                "            const body = 'update_auto_check=' + (document.getElementById('updateAutoCheck').checked ? '1' : '0');\n" +
-                "            fetch('/config/update-settings', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})\n" +
-                "                .then(r => r.json()).then(d => {\n" +
-                "                    const status = document.getElementById('updateStatus');\n" +
-                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
-                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + d.message;\n" +
-                "                }).catch(e => console.error('保存更新设置失败:', e));\n" +
-                "        }\n" +
-                "        function updateStateText(d) {\n" +
-                "            const state = d.update_state || '';\n" +
-                "            if (state === 'checking') return '正在检查更新…';\n" +
-                "            if (state === 'up_to_date') return '已是最新版本';\n" +
-                "            if (state === 'update_available') return '发现新版本 ' + (d.update_latest_version || '');\n" +
-                "            if (state === 'downloading') return '电视正在下载… ' + (d.update_progress || 0) + '%';\n" +
-                "            if (state === 'ready') return '已下载并校验通过，等待在电视上确认安装';\n" +
-                "            if (state === 'installing') return '等待电视上的安装确认…';\n" +
-                "            if (state === 'needs_permission') return '电视需要先允许 LiteTV 安装更新（请在电视上打开设置）';\n" +
-                "            if (state === 'error') return '检查失败：' + updateErrorText(d.update_error);\n" +
-                "            return '尚未检查';\n" +
-                "        }\n" +
-                // Error codes are the app's own enums; translate them once for the page.
-                "        function updateErrorText(code) {\n" +
-                "            const errors = {NETWORK: '网络不可用', HTTP: '服务器错误', HTTP_NOT_FOUND: '该版本尚未发布更新信息', PARSE: '更新信息格式不可用', NO_BUILD_FOR_DEVICE: '没有适配电视 CPU 的安装包', CHECKSUM: '安装包校验失败，已删除', SIGNATURE: '安装包签名与应用不一致，已拒绝', STORAGE: '存储空间异常', INSTALL_BLOCKED: '系统阻止安装，需在电视上允许', INSTALL_FAILED: '安装失败', CANCELLED: '已取消下载', UNKNOWN: '未知错误'};\n" +
-                "            return errors[code] || code || '未知错误';\n" +
-                "        }\n" +
-                "        function renderUpdate(d) {\n" +
-                "            document.getElementById('appVersionInfo').textContent = '电视端版本: LiteTV ' + (d.app_version_name || '?') + ' (' + (d.app_version_code || 0) + ')' + (d.update_last_check_ms ? '，上次检查 ' + new Date(d.update_last_check_ms).toLocaleString() : '，从未检查');\n" +
-                "            document.getElementById('updateStateInfo').textContent = updateStateText(d);\n" +
-                "            const changelog = d.update_changelog || [];\n" +
-                "            document.getElementById('updateChangelog').textContent = changelog.length ? ('更新内容：\\n· ' + changelog.join('\\n· ')) : '';\n" +
-                "        }\n" +
-                "        function checkUpdate() {\n" +
-                "            const status = document.getElementById('updateStatus');\n" +
-                "            status.className = 'status success';\n" +
-                "            status.textContent = '正在让电视检查更新…';\n" +
-                "            fetch('/config/update-check', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'action=check'})\n" +
-                "                .then(r => r.json()).then(d => {\n" +
-                "                    renderUpdate(d);\n" +
-                "                    status.className = 'status ' + (d.success ? 'success' : 'error');\n" +
-                "                    status.textContent = (d.success ? '✓ ' : '✗ ') + updateStateText(d);\n" +
-                "                }).catch(e => {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ 无法让电视检查更新: ' + e;\n" +
-                "                });\n" +
-                "        }\n" +
-                "        function installUpdate() {\n" +
-                "            const status = document.getElementById('updateStatus');\n" +
-                "            if (!confirm('将在电视上下载并校验安装包，然后需要有人在电视上确认安装。继续？')) return;\n" +
-                "            fetch('/config/update-install', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: 'action=install'})\n" +
-                "                .then(r => r.json()).then(d => {\n" +
-                "                    if (!d.success) {\n" +
-                "                        status.className = 'status error';\n" +
-                "                        status.textContent = '✗ ' + d.message;\n" +
-                "                        return;\n" +
-                "                    }\n" +
-                "                    status.className = 'status success';\n" +
-                "                    status.textContent = '✓ ' + d.message;\n" +
-                "                    pollUpdate(0);\n" +
-                "                }).catch(e => {\n" +
-                "                    status.className = 'status error';\n" +
-                "                    status.textContent = '✗ 无法触发更新: ' + e;\n" +
-                "                });\n" +
-                "        }\n" +
-                "        function pollUpdate(attempt) {\n" +
-                "            if (attempt > 40) return;\n" +
-                "            fetch('/config/get').then(r => r.json()).then(d => {\n" +
-                "                renderUpdate(d);\n" +
-                "                const status = document.getElementById('updateStatus');\n" +
-                "                status.className = 'status ' + (d.update_state === 'error' ? 'error' : 'success');\n" +
-                "                status.textContent = updateStateText(d);\n" +
-                "                const state = d.update_state || '';\n" +
-                "                if (state === 'downloading' || state === 'checking' || state === 'ready') {\n" +
-                "                    setTimeout(() => pollUpdate(attempt + 1), 1500);\n" +
-                "                }\n" +
-                "            }).catch(e => console.error('轮询更新状态失败:', e));\n" +
-                "        }\n" +
-                "        window.onload = function() {\n" +
-                "            fetch('/config/get').then(r => r.json()).then(d => {\n" +
-                "                document.getElementById('m3uUrl').value = d.m3u_url || '';\n" +
-                "                document.getElementById('epgUrl').value = d.epg_url || '';\n" +
-                "                document.getElementById('epgPreference').value = d.epg_preference || 'auto';\n" +
-                "                document.getElementById('videoRenderMode').value = d.video_render_mode || 'surface';\n" +
-                "                document.getElementById('videoDecodeMode').value = d.video_decode_mode || 'auto';\n" +
-                "                document.getElementById('videoTunneling').checked = !!d.video_tunneling;\n" +
-                "                document.getElementById('epgDisplay').value = d.epg_display_enabled === false ? '0' : '1';\n" +
-                "                document.getElementById('catchupBadge').value = d.catchup_badge === false ? '0' : '1';\n" +
-                "                document.getElementById('sidebarOpacity').value = String(d.sidebar_opacity == null ? 0 : d.sidebar_opacity);\n" +
-                "                const m3uFile = d.m3u_file_path || '';\n" +
-                "                const dropDir = d.m3u_drop_dir || '';\n" +
-                "                if (dropDir) {\n" +
-                "                    document.getElementById('m3uDropDirInfo').textContent = '也可把 .m3u 文件放到电视上：' + dropDir + '，再在电视设置里点「从文件夹导入」';\n" +
-                "                }\n" +
-                "                if (m3uFile) {\n" +
-                "                    document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + m3uFile;\n" +
-                "                    document.getElementById('clearM3uFileBtn').style.display = 'block';\n" +
-                "                } else {\n" +
-                "                    document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';\n" +
-                "                }\n" +
-                "                const m3uUrls = d.m3u_epg_urls || [];\n" +
-                "                document.getElementById('epgM3uInfo').textContent = m3uUrls.length\n" +
-                "                    ? 'M3U 内置 EPG: ' + m3uUrls.join(' | ')\n" +
-                "                    : '当前 M3U 未提供内置 EPG';\n" +
-                "                const active = d.active_epg_url || '';\n" +
-                "                document.getElementById('epgActiveInfo').textContent = active\n" +
-                "                    ? '当前生效 EPG: ' + active\n" +
-                "                    : '当前无生效 EPG 来源';\n" +
-                "                document.getElementById('mergeSameName').checked = d.merge_same_name_channels !== false;\n" +
-                "                document.getElementById('updateAutoCheck').checked = d.update_auto_check !== false;\n" +
-                "                renderUpdate(d);\n" +
-                "            }).catch(e => console.error('加载配置失败:', e));\n" +
-                "        };\n" +
-                "        document.getElementById('updateAutoCheck').addEventListener('change', saveUpdateSettings);\n" +
-                "    </script>\n" +
-                "</body>\n" +
-                "</html>";
+        String cached = sIndexHtml;
+        if (cached != null) {
+            return cached;
+        }
+        Context context = sAppContext;
+        if (context == null) {
+            return UNAVAILABLE_PAGE;
+        }
+        try (InputStream in = context.getAssets().open("web/index.html")) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            String html = new String(out.toByteArray(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            sIndexHtml = html;
+            return html;
+        } catch (IOException | RuntimeException e) {
+            Log.e(TAG, "Cannot read web/index.html from assets", e);
+            return UNAVAILABLE_PAGE;
+        }
     }
+
+    private static final String UNAVAILABLE_PAGE =
+            "<!DOCTYPE html><html><body>"
+            + "<p>Configuration page unavailable. The web assets are missing from this build.</p>"
+            + "</body></html>";
 }

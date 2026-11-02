@@ -11,6 +11,82 @@ import java.util.List;
 import xyz.doikki.videoplayer.player.VideoViewConfig;
 
 public class AppConfig {
+
+    /** Where the values live; swapped for an in-memory store by tests. */
+    private static volatile SettingsStore sStore = new HawkStore();
+
+    /** Told which setting changed whenever one is written. */
+    public interface OnSettingsChangedListener {
+        void onSettingsChanged(java.util.Set<String> keys);
+    }
+
+    private static final java.util.List<OnSettingsChangedListener> sListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    public static void addSettingsListener(OnSettingsChangedListener listener) {
+        if (listener != null && !sListeners.contains(listener)) {
+            sListeners.add(listener);
+        }
+    }
+
+    public static void removeSettingsListener(OnSettingsChangedListener listener) {
+        sListeners.remove(listener);
+    }
+
+    /** Swaps the storage. Tests inject {@link MemoryStore}; production never calls this. */
+    public static void useStore(SettingsStore store) {
+        if (store != null) {
+            sStore = store;
+        }
+    }
+
+    /**
+     * Whether a change to these keys affects the channel list.
+     *
+     * <p>Asked by the player so it does not have to know the storage keys: renaming one here used
+     * to mean hunting the string down in another package.
+     */
+    public static boolean affectsPlaylist(java.util.Set<String> keys) {
+        return keys.contains(M3U_URL_KEY) || keys.contains(M3U_FILE_PATH_KEY)
+                || keys.contains(MERGE_SAME_NAME_CHANNELS_KEY);
+    }
+
+    /** Whether a change to these keys affects the guide. */
+    public static boolean affectsGuide(java.util.Set<String> keys) {
+        return keys.contains(EPG_URL_KEY) || keys.contains(EPG_PREFERENCE_KEY);
+    }
+
+    private static <T> T read(String key, T defaultValue) {
+        return sStore.get(key, defaultValue);
+    }
+
+    /**
+     * Writes a value and tells the listeners.
+     *
+     * <p>Notification lives here rather than in each setter: a new setting then cannot be added
+     * without also notifying, which is how the old "compare config signatures on resume" scheme
+     * drifted out of step with the settings it was watching.
+     */
+    private static void write(String key, Object value) {
+        sStore.put(key, value);
+        if (sListeners.isEmpty()) {
+            return;
+        }
+        java.util.Set<String> keys = new java.util.HashSet<>();
+        keys.add(key);
+        for (OnSettingsChangedListener listener : sListeners) {
+            try {
+                listener.onSettingsChanged(keys);
+            } catch (RuntimeException e) {
+                // A listener must never break the write it is being told about. java.util.logging
+                // rather than android.util.Log: this layer is meant to run in plain JVM tests.
+                java.util.logging.Logger.getLogger("AppConfig")
+                        .log(java.util.logging.Level.WARNING,
+                                "Settings listener threw for " + key, e);
+            }
+        }
+    }
+
     private static final String M3U_URL_KEY = "app_m3u_url";
     private static final String EPG_URL_KEY = "app_epg_url";
     private static final String WEB_SERVER_ENABLED_KEY = "app_web_server_enabled";
@@ -49,25 +125,25 @@ public class AppConfig {
 
     // M3U URL
     public static String getM3uUrl() {
-        return Hawk.get(M3U_URL_KEY, "");
+        return read(M3U_URL_KEY, "");
     }
 
     public static void setM3uUrl(String url) {
-        Hawk.put(M3U_URL_KEY, url);
+        write(M3U_URL_KEY, url);
     }
 
     // EPG URL
     public static String getEpgUrl() {
-        return Hawk.get(EPG_URL_KEY, DEFAULT_EPG_URL);
+        return read(EPG_URL_KEY, DEFAULT_EPG_URL);
     }
 
     public static void setEpgUrl(String url) {
-        Hawk.put(EPG_URL_KEY, url);
+        write(EPG_URL_KEY, url);
     }
 
     /** EPG source priority; see the constants for the three meanings. */
     public static String getEpgPreference() {
-        String preference = Hawk.get(EPG_PREFERENCE_KEY, EPG_PREFERENCE_AUTO);
+        String preference = read(EPG_PREFERENCE_KEY, EPG_PREFERENCE_AUTO);
         if (!EPG_PREFERENCE_AUTO.equals(preference)
                 && !EPG_PREFERENCE_M3U.equals(preference)
                 && !EPG_PREFERENCE_USER.equals(preference)) {
@@ -77,17 +153,17 @@ public class AppConfig {
     }
 
     public static void setEpgPreference(String preference) {
-        Hawk.put(EPG_PREFERENCE_KEY, preference);
+        write(EPG_PREFERENCE_KEY, preference);
     }
 
     /** EPG feed URLs the playlist itself declared, in playlist order (first is primary). */
     public static List<String> getM3uEpgUrls() {
-        List<String> urls = Hawk.get(M3U_EPG_URLS_KEY, null);
+        List<String> urls = read(M3U_EPG_URLS_KEY, null);
         return urls != null ? urls : new ArrayList<String>();
     }
 
     public static void setM3uEpgUrls(List<String> urls) {
-        Hawk.put(M3U_EPG_URLS_KEY, urls == null ? new ArrayList<String>() : new ArrayList<>(urls));
+        write(M3U_EPG_URLS_KEY, urls == null ? new ArrayList<String>() : new ArrayList<>(urls));
     }
 
     /**
@@ -126,12 +202,12 @@ public class AppConfig {
     public static final int RENDER_TEXTURE = 1;
 
     public static int getVideoRenderMode() {
-        int mode = Hawk.get(VIDEO_RENDER_MODE_KEY, RENDER_SURFACE);
+        int mode = read(VIDEO_RENDER_MODE_KEY, RENDER_SURFACE);
         return mode == RENDER_TEXTURE ? RENDER_TEXTURE : RENDER_SURFACE;
     }
 
     public static void setVideoRenderMode(int mode) {
-        Hawk.put(VIDEO_RENDER_MODE_KEY, mode == RENDER_TEXTURE ? RENDER_TEXTURE : RENDER_SURFACE);
+        write(VIDEO_RENDER_MODE_KEY, mode == RENDER_TEXTURE ? RENDER_TEXTURE : RENDER_SURFACE);
     }
 
     /**
@@ -140,7 +216,7 @@ public class AppConfig {
      * cost of smoothness. Needs an app restart.
      */
     public static int getVideoDecodeMode() {
-        int mode = Hawk.get(VIDEO_DECODE_MODE_KEY, VideoViewConfig.DECODE_AUTO);
+        int mode = read(VIDEO_DECODE_MODE_KEY, VideoViewConfig.DECODE_AUTO);
         if (mode != VideoViewConfig.DECODE_HARDWARE && mode != VideoViewConfig.DECODE_SOFTWARE) {
             return VideoViewConfig.DECODE_AUTO;
         }
@@ -148,7 +224,7 @@ public class AppConfig {
     }
 
     public static void setVideoDecodeMode(int mode) {
-        Hawk.put(VIDEO_DECODE_MODE_KEY, mode);
+        write(VIDEO_DECODE_MODE_KEY, mode);
     }
 
     /**
@@ -158,28 +234,28 @@ public class AppConfig {
      * rate. Needs an app restart.
      */
     public static boolean isTunnelingEnabled() {
-        return Hawk.get(VIDEO_TUNNELING_KEY, false);
+        return read(VIDEO_TUNNELING_KEY, false);
     }
 
     public static void setTunnelingEnabled(boolean enabled) {
-        Hawk.put(VIDEO_TUNNELING_KEY, enabled);
+        write(VIDEO_TUNNELING_KEY, enabled);
     }
 
     // Web Server
     public static boolean isWebServerEnabled() {
-        return Hawk.get(WEB_SERVER_ENABLED_KEY, true);  // Default: enabled for first launch
+        return read(WEB_SERVER_ENABLED_KEY, true);  // Default: enabled for first launch
     }
 
     public static void setWebServerEnabled(boolean enabled) {
-        Hawk.put(WEB_SERVER_ENABLED_KEY, enabled);
+        write(WEB_SERVER_ENABLED_KEY, enabled);
     }
 
     public static int getWebServerPort() {
-        return Hawk.get(WEB_SERVER_PORT_KEY, DEFAULT_WEB_SERVER_PORT);
+        return read(WEB_SERVER_PORT_KEY, DEFAULT_WEB_SERVER_PORT);
     }
 
     public static void setWebServerPort(int port) {
-        Hawk.put(WEB_SERVER_PORT_KEY, port);
+        write(WEB_SERVER_PORT_KEY, port);
     }
 
     /** How solid the channel-list panels are painted: 0 translucent, 1 semi-opaque, 2 opaque. */
@@ -188,49 +264,49 @@ public class AppConfig {
     public static final int SIDEBAR_OPAQUE = 2;
 
     public static int getSidebarOpacity() {
-        int level = Hawk.get(SIDEBAR_OPACITY_KEY, SIDEBAR_TRANSLUCENT);
+        int level = read(SIDEBAR_OPACITY_KEY, SIDEBAR_TRANSLUCENT);
         return level >= SIDEBAR_TRANSLUCENT && level <= SIDEBAR_OPAQUE ? level : SIDEBAR_TRANSLUCENT;
     }
 
     public static void setSidebarOpacity(int level) {
-        Hawk.put(SIDEBAR_OPACITY_KEY, level);
+        write(SIDEBAR_OPACITY_KEY, level);
     }
 
     // M3U File path (for uploaded files)
     public static String getM3uFilePath() {
-        return Hawk.get(M3U_FILE_PATH_KEY, "");
+        return read(M3U_FILE_PATH_KEY, "");
     }
 
     public static void setM3uFilePath(String path) {
-        Hawk.put(M3U_FILE_PATH_KEY, path);
+        write(M3U_FILE_PATH_KEY, path);
     }
 
     // EPG Display toggle
     public static boolean isEpgDisplayEnabled() {
-        return Hawk.get(EPG_DISPLAY_KEY, true);  // Default: enabled
+        return read(EPG_DISPLAY_KEY, true);  // Default: enabled
     }
 
     public static void setEpgDisplayEnabled(boolean enabled) {
-        Hawk.put(EPG_DISPLAY_KEY, enabled);
+        write(EPG_DISPLAY_KEY, enabled);
     }
 
     // EPG cache management. How old the data may get lives here; whether the data on disk is
     // still usable is answered by EpgCache alone, so the two cannot disagree.
     public static int getEpgCacheValidityHours() {
-        return Hawk.get(EPG_CACHE_VALIDITY_HOURS_KEY, DEFAULT_EPG_CACHE_HOURS);
+        return read(EPG_CACHE_VALIDITY_HOURS_KEY, DEFAULT_EPG_CACHE_HOURS);
     }
 
     public static void setEpgCacheValidityHours(int hours) {
-        Hawk.put(EPG_CACHE_VALIDITY_HOURS_KEY, hours);
+        write(EPG_CACHE_VALIDITY_HOURS_KEY, hours);
     }
 
     // Last played channel URL (for resume playback on app startup)
     public static String getLastChannelUrl() {
-        return Hawk.get(LAST_CHANNEL_URL_KEY, "");
+        return read(LAST_CHANNEL_URL_KEY, "");
     }
 
     public static void setLastChannelUrl(String url) {
-        Hawk.put(LAST_CHANNEL_URL_KEY, url);
+        write(LAST_CHANNEL_URL_KEY, url);
     }
 
     /**
@@ -238,31 +314,31 @@ public class AppConfig {
      * a playlist may hand out a different URL for the same channel on every refresh.
      */
     public static List<String> getFavoriteChannels() {
-        List<String> names = Hawk.get(FAVORITE_CHANNELS_KEY, null);
+        List<String> names = read(FAVORITE_CHANNELS_KEY, null);
         return names != null ? names : new ArrayList<String>();
     }
 
     public static void setFavoriteChannels(List<String> names) {
-        Hawk.put(FAVORITE_CHANNELS_KEY, new ArrayList<>(names));
+        write(FAVORITE_CHANNELS_KEY, new ArrayList<>(names));
     }
 
     // Self-update. The install itself is user-initiated; these keys only remember the user's
     // preference and what the last automatic check found.
     public static boolean isUpdateAutoCheckEnabled() {
-        return Hawk.get(UPDATE_AUTO_CHECK_KEY, true);  // Default: on, at most once a day
+        return read(UPDATE_AUTO_CHECK_KEY, true);  // Default: on, at most once a day
     }
 
     public static void setUpdateAutoCheckEnabled(boolean enabled) {
-        Hawk.put(UPDATE_AUTO_CHECK_KEY, enabled);
+        write(UPDATE_AUTO_CHECK_KEY, enabled);
     }
 
     /** When the last check (automatic or manual) completed; 0 when never. */
     public static long getUpdateLastCheckMs() {
-        return Hawk.get(UPDATE_LAST_CHECK_KEY, 0L);
+        return read(UPDATE_LAST_CHECK_KEY, 0L);
     }
 
     public static void setUpdateLastCheckMs(long timeMs) {
-        Hawk.put(UPDATE_LAST_CHECK_KEY, timeMs);
+        write(UPDATE_LAST_CHECK_KEY, timeMs);
     }
 
     /**
@@ -271,11 +347,11 @@ public class AppConfig {
      * without a translation table of its own.
      */
     public static String getUpdateLastError() {
-        return Hawk.get(UPDATE_LAST_ERROR_KEY, "");
+        return read(UPDATE_LAST_ERROR_KEY, "");
     }
 
     public static void setUpdateLastError(String error) {
-        Hawk.put(UPDATE_LAST_ERROR_KEY, error == null ? "" : error);
+        write(UPDATE_LAST_ERROR_KEY, error == null ? "" : error);
     }
 
     /**
@@ -284,20 +360,20 @@ public class AppConfig {
      * which version it belongs to.
      */
     public static int getUpdatePendingVersion() {
-        return Hawk.get(UPDATE_PENDING_VERSION_KEY, 0);
+        return read(UPDATE_PENDING_VERSION_KEY, 0);
     }
 
     public static void setUpdatePendingVersion(int versionCode) {
-        Hawk.put(UPDATE_PENDING_VERSION_KEY, versionCode);
+        write(UPDATE_PENDING_VERSION_KEY, versionCode);
     }
 
     /** versionName that goes with {@link #getUpdatePendingVersion()}, for display. */
     public static String getUpdatePendingName() {
-        return Hawk.get(UPDATE_PENDING_NAME_KEY, "");
+        return read(UPDATE_PENDING_NAME_KEY, "");
     }
 
     public static void setUpdatePendingName(String versionName) {
-        Hawk.put(UPDATE_PENDING_NAME_KEY, versionName == null ? "" : versionName);
+        write(UPDATE_PENDING_NAME_KEY, versionName == null ? "" : versionName);
     }
 
     // Channel list
@@ -308,11 +384,11 @@ public class AppConfig {
      * unaffected either way.
      */
     public static boolean isMergeSameNameChannelsEnabled() {
-        return Hawk.get(MERGE_SAME_NAME_CHANNELS_KEY, true);  // Default: on
+        return read(MERGE_SAME_NAME_CHANNELS_KEY, true);  // Default: on
     }
 
     public static void setMergeSameNameChannelsEnabled(boolean enabled) {
-        Hawk.put(MERGE_SAME_NAME_CHANNELS_KEY, enabled);
+        write(MERGE_SAME_NAME_CHANNELS_KEY, enabled);
     }
 
     /**
@@ -323,10 +399,10 @@ public class AppConfig {
      * switched off for people who find it distracting.
      */
     public static boolean isCatchupBadgeEnabled() {
-        return Hawk.get(CATCHUP_BADGE_KEY, true);
+        return read(CATCHUP_BADGE_KEY, true);
     }
 
     public static void setCatchupBadgeEnabled(boolean enabled) {
-        Hawk.put(CATCHUP_BADGE_KEY, enabled);
+        write(CATCHUP_BADGE_KEY, enabled);
     }
 }

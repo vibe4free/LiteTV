@@ -63,23 +63,12 @@ public class MainActivity extends Activity {
     /** Dragging to within this of "now" keeps (or returns to) live. */
     private static final long TIMESHIFT_LIVE_MARGIN_MS = 5 * 1000L;
     private ChannelRepository.OnChannelsChangedListener mChannelsChangedListener;
-    /**
-     * Snapshot of the EPG settings the in-memory programmes were loaded with. Comparing on
-     * resume catches edits made in the settings screen (URL or priority), which cannot reach
-     * the EpgManager directly.
-     */
-    private String mLastEpgConfigSignature = "";
-    /** Snapshot of the M3U source settings (URL + local file), compared on resume so edits made
-     *  in the settings screen reload the channels. */
-    private String mLastM3uConfigSignature = "";
     private int mCurrentChannelIndex = 0;
     private long mLastChannelSwitchTime = 0;
     private boolean mChannelListVisible = false;
     private boolean mIsInitialLoad = true;
     private static final long CHANNEL_SWITCH_DEBOUNCE_MS = 250;
 
-    /** Backoff between reconnect attempts; its length is also the attempt limit. */
-    private static final long[] RECONNECT_DELAYS_MS = {1_000, 2_000, 4_000, 8_000, 15_000};
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final Runnable mReconnectRunnable = this::reconnectCurrentChannel;
     private int mReconnectAttempt = 0;
@@ -89,6 +78,13 @@ public class MainActivity extends Activity {
 
     /** Everything about the replay that is running, cleared as one. */
     private final CatchupState mCatchup = new CatchupState();
+    /** Told whenever a setting is written, so the player can follow it immediately. */
+    private AppConfig.OnSettingsChangedListener mSettingsListener;
+    /** Keys written but not yet acted on; guarded because writes arrive from other threads. */
+    private final java.util.Set<String> mPendingSettingKeys = new java.util.HashSet<>();
+    private final Runnable mApplySettingsRunnable = this::applyPendingSettings;
+    /** Long enough to merge a page save, short enough to feel immediate. */
+    private static final long SETTINGS_DEBOUNCE_MS = 80;
     private static final long CATCHUP_SEEK_STEP_MS = SeekKeyPolicy.STEP_MS;
     /** How far to rewind from "now" when live LEFT enters 回看 without EPG data. */
     private static final long CATCHUP_REWIND_MS = 2 * 60 * 1000L;
@@ -162,8 +158,6 @@ public class MainActivity extends Activity {
         mChannelRepository = new ChannelRepository(this);
         mNavigator = new ChannelNavigator();
         mEpgManager = new EpgManager(this);
-        mLastEpgConfigSignature = epgConfigSignature();
-        mLastM3uConfigSignature = m3uConfigSignature();
 
         // Create overlay components
         FrameLayout rootView = (FrameLayout) mVideoView.getParent();
@@ -222,6 +216,10 @@ public class MainActivity extends Activity {
         // tell a replay from live TV at a glance.
         mCatchupBadge = new android.widget.ImageView(this);
         mCatchupBadge.setImageResource(R.drawable.ic_replay_badge);
+        // The disc keeps the mark readable on a bright picture; on dark scenes it is invisible.
+        mCatchupBadge.setBackgroundResource(R.drawable.replay_badge_bg);
+        int badgePad = dp2px(2);
+        mCatchupBadge.setPadding(badgePad, badgePad, badgePad, badgePad);
         mCatchupBadge.setVisibility(View.GONE);
         FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(dp2px(22), dp2px(22));
         badgeLp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
@@ -317,15 +315,16 @@ public class MainActivity extends Activity {
             @Override
             public void onChannelsChanged(java.util.List<com.cabletv.player.model.ChannelGroup> channels) {
                 Log.i(TAG, "Channels updated: " + channels.size());
-                // On initial load, try to resume last played channel; on subsequent reloads, reset to first
-                if (mIsInitialLoad) {
-                    mIsInitialLoad = false;
-                    mCurrentChannelIndex = mChannelRepository.getCurrentChannelIndex(AppConfig.getLastChannelUrl());
-                    Log.d(TAG, "Initial load: restoring last channel with url=" + AppConfig.getLastChannelUrl() + ", index=" + mCurrentChannelIndex);
-                } else {
-                    mCurrentChannelIndex = 0;
-                    Log.d(TAG, "Subsequent reload: resetting to first channel");
-                }
+                // Both the first load and every reload follow the channel that was playing. A
+                // reload happens when the playlist itself changes (edited source, merge switch,
+                // web page), and jumping to the first channel there left the viewer on a
+                // different programme than the one they were watching.
+                mIsInitialLoad = false;
+                String playingUrl = AppConfig.getLastChannelUrl();
+                int restored = mChannelRepository.findChannelIndex(playingUrl);
+                mCurrentChannelIndex = restored >= 0 ? restored : 0;
+                Log.d(TAG, "Channels (re)loaded: url=" + playingUrl + " → index="
+                        + mCurrentChannelIndex + (restored >= 0 ? "" : " (not in playlist, using 0)"));
                 // Group the new playlist, and start the channel keys in the group holding whatever
                 // is about to play
                 mNavigator.setChannels(channels, mChannelRepository.getAllChannels());
@@ -359,6 +358,10 @@ public class MainActivity extends Activity {
                     android.widget.Toast.LENGTH_LONG).show();
         });
 
+        // Follow settings as they are written (settings panel, web page, updater).
+        mSettingsListener = this::onSettingsChanged;
+        AppConfig.addSettingsListener(mSettingsListener);
+
         // Load channels from the configured source; guide the user if there is none yet.
         String m3uUrl = AppConfig.getM3uUrl();
         String m3uFilePath = AppConfig.getM3uFilePath();
@@ -374,52 +377,13 @@ public class MainActivity extends Activity {
         // Set up audio manager for volume control
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
 
-        // Register for remote configuration changes unconditionally: the user can switch the web
-        // server on from Settings later, and without a listener those edits would only take
-        // effect on the next launch.
-        ConfigWebServer.setConfigChangeListener(new ConfigWebServer.OnConfigChangeListener() {
-            @Override
-            public void onM3uUrlChanged(String newUrl) {
-                Log.d(TAG, "M3U URL changed, reloading channels: " + newUrl);
+        // The web page's settings arrive through AppConfig's change bus, the same path the
+        // settings panel uses. Only the uploaded playlist file needs a direct callback, because
+        // the file is written before its path is stored.
+        ConfigWebServer.setConfigChangeListener(newPath -> {
+            Log.d(TAG, "Uploaded playlist stored, reloading channels");
+            if (mChannelRepository != null) {
                 mChannelRepository.reload();
-            }
-
-            @Override
-            public void onEpgUrlChanged(String newUrl) {
-                Log.d(TAG, "EPG URL changed, reloading EPG: " + newUrl);
-                mLastEpgConfigSignature = epgConfigSignature();
-                mEpgManager.onEpgSourceChanged();
-                // Per-channel sources load lazily, so ask for the channel on screen right
-                // away instead of leaving its info bar empty until the user navigates.
-                Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
-                if (current != null) {
-                    mEpgManager.loadEpg(current);
-                }
-            }
-
-            @Override
-            public void onEpgPreferenceChanged(String preference) {
-                Log.d(TAG, "EPG priority changed, reloading EPG: " + preference);
-                mLastEpgConfigSignature = epgConfigSignature();
-                mEpgManager.onEpgSourceChanged();
-                Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
-                if (current != null) {
-                    mEpgManager.loadEpg(current);
-                }
-            }
-
-            @Override
-            public void onM3uFileChanged(String newPath) {
-                Log.d(TAG, "Local M3U file changed, reloading channels: " + newPath);
-                mLastM3uConfigSignature = m3uConfigSignature();
-                mChannelRepository.reload();
-            }
-
-            @Override
-            public void onDisplaySettingsChanged() {
-                Log.d(TAG, "Display settings changed from the web page");
-                // The web server answers on its own thread; views belong to the UI thread.
-                runOnUiThread(MainActivity.this::updateCatchupBadge);
             }
         });
         if (AppConfig.isWebServerEnabled()) {
@@ -450,8 +414,13 @@ public class MainActivity extends Activity {
                 if (SettingsPanel.backRouteFor(mSettingsPanel.isEditingText())
                         == SettingsPanel.BackRoute.LEAVE_FIELD) {
                     // Typing wins: BACK leaves the field (closing the keyboard and putting the row
-                    // back to "press OK to edit") instead of taking the whole panel away.
-                    return super.dispatchKeyEvent(event);
+                    // back to "press OK to edit") instead of taking the whole panel away. Handled
+                    // here rather than by the field, because the input method takes BACK first to
+                    // close the keyboard -- the field never sees the key.
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        mSettingsPanel.stopEditing();
+                    }
+                    return true;
                 }
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     handleBack();
@@ -726,6 +695,12 @@ public class MainActivity extends Activity {
     private void tickTimeShiftBar() {
         if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
             mTimeShiftBar.tickIfIdle();
+            if (mTimeShiftBar.isPastLastProgramme()) {
+                // Live playback crossed into a programme the track had not been told about:
+                // without this the strip kept the old blocks and the programme name vanished.
+                Log.d(TAG, "Time-shift bar passed the last known programme, refreshing");
+                refreshTimeShiftBar();
+            }
             mMainHandler.postDelayed(mTimeShiftTicker, 1000);
         }
     }
@@ -830,7 +805,7 @@ public class MainActivity extends Activity {
         mTimeShiftBar.setChannelLabel(channel.name);
         mTimeShiftBar.setBackToLiveVisible(false);
         mTimeShiftBar.setWindow(start, now, now);
-        mTimeShiftBar.setPrograms(timelineSegments(channel, start, now));
+        mTimeShiftBar.setPrograms(timelineSegments(channel, start, now + 6 * 60 * 60 * 1000L));
         // Watching live: the playhead follows the broadcast and the right end is the live edge.
         mTimeShiftBar.setLiveMode(true, now);
         if (forceShow) {
@@ -856,6 +831,9 @@ public class MainActivity extends Activity {
             if (program == null || program.endTime <= fromMs || program.startTime >= toMs) {
                 continue;
             }
+            // Listed up to the window end, but the segments themselves run to their own end; a
+            // programme that starts later is still needed the moment live playback crosses into
+            // it, so the cut-off is generous rather than exact.
             // The programme's own boundaries, not clipped to the window: clipping here made the
             // current block shrink every time the window end moved, which read as the progress
             // bar changing length while nothing had changed.
@@ -1344,18 +1322,6 @@ public class MainActivity extends Activity {
     }
 
     /** Identity of the EPG settings the user controls directly (URL + priority). */
-    private static String epgConfigSignature() {
-        return AppConfig.getEpgUrl() + "\n" + AppConfig.getEpgPreference();
-    }
-
-    /** Identity of the M3U source (URL + local file path). */
-    private static String m3uConfigSignature() {
-        // The channel list is built from the playlist, so the merge setting belongs here too:
-        // changing it in the settings screen reloads the list when the viewer comes back.
-        return AppConfig.getM3uUrl() + "\n" + AppConfig.getM3uFilePath()
-                + "\n" + AppConfig.isMergeSameNameChannelsEnabled();
-    }
-
     private void handleChannelUp() {
         long now = System.currentTimeMillis();
         if (now - mLastChannelSwitchTime < CHANNEL_SWITCH_DEBOUNCE_MS) {
@@ -1826,17 +1792,17 @@ public class MainActivity extends Activity {
         if (channel == null) {
             return;
         }
-        if (mReconnectAttempt >= RECONNECT_DELAYS_MS.length) {
+        if (!ReconnectPolicy.canRetry(mReconnectAttempt)) {
             Log.w(TAG, "Giving up on " + channel.name + " after " + mReconnectAttempt + " attempts");
             mPlaybackStatusView.showMessage(getString(R.string.playback_failed, channel.name));
             return;
         }
-        long delay = RECONNECT_DELAYS_MS[mReconnectAttempt];
+        long delay = ReconnectPolicy.delayFor(mReconnectAttempt);
         mReconnectAttempt++;
         mPlaybackStatusView.showMessage(getString(R.string.playback_reconnecting,
-                mReconnectAttempt, RECONNECT_DELAYS_MS.length));
-        Log.w(TAG, "Scheduling reconnect " + mReconnectAttempt + "/" + RECONNECT_DELAYS_MS.length
-                + " for " + channel.name + " in " + delay + "ms");
+                ReconnectPolicy.attemptNumber(mReconnectAttempt - 1), ReconnectPolicy.maxAttempts()));
+        Log.w(TAG, "Scheduling reconnect " + mReconnectAttempt + "/"
+                + ReconnectPolicy.maxAttempts() + " for " + channel.name + " in " + delay + "ms");
         mMainHandler.removeCallbacks(mReconnectRunnable);
         mMainHandler.postDelayed(mReconnectRunnable, delay);
     }
@@ -1907,24 +1873,53 @@ public class MainActivity extends Activity {
      * otherwise keep playing the old playlist.
      */
     private void applyConfigurationChanges() {
-        String m3uSignature = m3uConfigSignature();
-        if (!m3uSignature.equals(mLastM3uConfigSignature)) {
-            mLastM3uConfigSignature = m3uSignature;
-            if (mChannelRepository != null) {
-                Log.d(TAG, "M3U source changed in the settings, reloading channels");
-                mChannelRepository.reload();
+        // The settings now announce themselves (AppConfig.OnSettingsChangedListener), so there is
+        // nothing to compare here; this is only the "player came back to the front" path.
+        updateCatchupBadge();
+    }
+
+    /**
+     * Follows a setting the moment it is written.
+     *
+     * <p>Replaces comparing fingerprints of the playlist and guide settings on resume: that
+     * scheme could only notice an edit when the player happened to come back to the front, and
+     * silently missed everything written while it stayed visible (the settings panel, the web
+     * page).
+     */
+    private void onSettingsChanged(java.util.Set<String> keys) {
+        // Settings can be written from the web server's thread; the work below touches views and
+        // the player, so it has to happen on the main thread.
+        synchronized (mPendingSettingKeys) {
+            mPendingSettingKeys.addAll(keys);
+        }
+        // Saving a page writes several keys in a row: collapse them into one reload.
+        mMainHandler.removeCallbacks(mApplySettingsRunnable);
+        mMainHandler.postDelayed(mApplySettingsRunnable, SETTINGS_DEBOUNCE_MS);
+    }
+
+    private void applyPendingSettings() {
+        java.util.Set<String> keys;
+        synchronized (mPendingSettingKeys) {
+            keys = new java.util.HashSet<>(mPendingSettingKeys);
+            mPendingSettingKeys.clear();
+        }
+        if (mDestroyed) {
+            return;
+        }
+        boolean m3u = AppConfig.affectsPlaylist(keys);
+        boolean epg = AppConfig.affectsGuide(keys);
+        if (m3u && mChannelRepository != null) {
+            Log.d(TAG, "Playlist settings changed, reloading channels");
+            mChannelRepository.reload();
+        }
+        if (epg && mEpgManager != null) {
+            Log.d(TAG, "Guide settings changed, reloading the guide");
+            mEpgManager.onEpgSourceChanged();
+            Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
+            if (current != null) {
+                mEpgManager.loadEpg(current);
             }
         }
-        String signature = epgConfigSignature();
-        if (!signature.equals(mLastEpgConfigSignature)) {
-            mLastEpgConfigSignature = signature;
-            if (mEpgManager != null) {
-                Log.d(TAG, "EPG settings changed in the settings, reloading");
-                mEpgManager.onEpgSourceChanged();
-            }
-        }
-        // Display preferences have no signature of their own; the badge simply follows the
-        // setting every time the settings report a change.
         updateCatchupBadge();
     }
 
@@ -1950,6 +1945,10 @@ public class MainActivity extends Activity {
         // this Activity for the whole process lifetime.
         ConfigWebServer.setConfigChangeListener(null);
         ConfigWebServer.stopServer();
+        if (mSettingsListener != null) {
+            AppConfig.removeSettingsListener(mSettingsListener);
+            mSettingsListener = null;
+        }
         if (mChannelsChangedListener != null) {
             mChannelRepository.removeListener(mChannelsChangedListener);
             mChannelsChangedListener = null;

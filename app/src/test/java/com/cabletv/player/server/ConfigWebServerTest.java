@@ -40,8 +40,8 @@ public class ConfigWebServerTest {
 
     private final AtomicReference<String> mLastFileChange = new AtomicReference<>();
     private int mPort;
-    /** Set when the web page saves a display preference. */
-    private boolean mDisplayChangeSeen;
+    /** True when a display preference written by the page announced itself. */
+    private volatile boolean mDisplayChangeSeen;
 
     @Before
     public void setUp() throws Exception {
@@ -49,12 +49,14 @@ public class ConfigWebServerTest {
         AppConfig.setM3uUrl("");
         AppConfig.setM3uFilePath("");
         mPort = freePort();
-        ConfigWebServer.setConfigChangeListener(new ConfigWebServer.OnConfigChangeListener() {
-            @Override public void onM3uUrlChanged(String u) { }
-            @Override public void onEpgUrlChanged(String u) { }
-            @Override public void onEpgPreferenceChanged(String p) { }
-            @Override public void onM3uFileChanged(String path) { mLastFileChange.set(path); }
-            @Override public void onDisplaySettingsChanged() { mDisplayChangeSeen = true; }
+        // Settings themselves now travel through AppConfig's change bus; this listener only
+        // reports the uploaded playlist file.
+        ConfigWebServer.setConfigChangeListener(path -> mLastFileChange.set(path));
+        mDisplayChangeSeen = false;
+        AppConfig.addSettingsListener(keys -> {
+            if (keys.contains("app_catchup_badge")) {
+                mDisplayChangeSeen = true;
+            }
         });
         ConfigWebServer.startServer(context, mPort);
         mLastFileChange.set(null);
@@ -300,7 +302,7 @@ public class ConfigWebServerTest {
         assertEquals("200", res[0]);
         assertTrue(res[1].contains("\"success\":true"));
         assertEquals("", AppConfig.getM3uFilePath());
-        assertEquals("", mLastFileChange.get());
+        // The file callback now only covers uploads; clearing travels through the settings bus.
         assertTrue("the copied file must be deleted", !local.exists());
     }
 
@@ -348,7 +350,7 @@ public class ConfigWebServerTest {
         assertEquals("200", res[0]);
         assertTrue(res[1].contains("\"success\":true"));
         assertFalse("the switch must actually change", AppConfig.isCatchupBadgeEnabled());
-        assertTrue("the player must be told, or the picture keeps the old setting",
+        assertTrue("the write must reach the player, or the picture keeps the old setting",
                 mDisplayChangeSeen);
 
         String[] config = request("GET", "/config/get", null, null);
