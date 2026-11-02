@@ -43,7 +43,7 @@ public class ProgramTimeColorTest {
         return System.currentTimeMillis() - minutes * 60_000L;
     }
 
-    private static TextView timeViewOf(ChannelListComponent.ProgramListAdapter.ProgramViewHolder holder) {
+    private static TextView timeViewOf(ProgramListAdapter.ProgramViewHolder holder) {
         assertNotNull(holder);
         LinearLayout row = (LinearLayout) holder.itemView;
         return (TextView) row.getChildAt(0);
@@ -56,21 +56,21 @@ public class ProgramTimeColorTest {
                 program("已结束", minutesAgo(120), minutesAgo(60)),
                 program("正在播出", now - 60_000L, now + 60_000L)));
 
-        ChannelListComponent.ProgramListAdapter adapter =
-                new ChannelListComponent.ProgramListAdapter(mContext, programs, new RowLabelScroller());
+        ProgramListAdapter adapter =
+                new ProgramListAdapter(mContext, programs, new RowLabelScroller());
         ViewGroup parent = new LinearLayout(mContext);
-        ChannelListComponent.ProgramListAdapter.ProgramViewHolder holder =
+        ProgramListAdapter.ProgramViewHolder holder =
                 adapter.onCreateViewHolder(parent, 0);
 
         // Bind the row to the programme on air: it is picked out.
         adapter.onBindViewHolder(holder, 1);
-        assertEquals(ChannelListComponent.ProgramListAdapter.ProgramViewHolder.TIME_CURRENT,
+        assertEquals(ProgramListAdapter.ProgramViewHolder.TIME_CURRENT,
                 timeViewOf(holder).getCurrentTextColor());
 
         // The same holder is reused for a finished programme: the highlight must not follow it.
         adapter.onBindViewHolder(holder, 0);
         assertEquals("a recycled row must not stay highlighted",
-                ChannelListComponent.ProgramListAdapter.ProgramViewHolder.TIME_NORMAL,
+                ProgramListAdapter.ProgramViewHolder.TIME_NORMAL,
                 timeViewOf(holder).getCurrentTextColor());
     }
 
@@ -82,17 +82,17 @@ public class ProgramTimeColorTest {
                 program("正在播出", now - 60_000L, now + 60_000L),
                 program("稍后", now + 3_600_000L, now + 7_200_000L)));
 
-        ChannelListComponent.ProgramListAdapter adapter =
-                new ChannelListComponent.ProgramListAdapter(mContext, programs, new RowLabelScroller());
+        ProgramListAdapter adapter =
+                new ProgramListAdapter(mContext, programs, new RowLabelScroller());
         ViewGroup parent = new LinearLayout(mContext);
 
         for (int index = 0; index < programs.size(); index++) {
-            ChannelListComponent.ProgramListAdapter.ProgramViewHolder holder =
+            ProgramListAdapter.ProgramViewHolder holder =
                     adapter.onCreateViewHolder(parent, 0);
             adapter.onBindViewHolder(holder, index);
             int expected = index == 1
-                    ? ChannelListComponent.ProgramListAdapter.ProgramViewHolder.TIME_CURRENT
-                    : ChannelListComponent.ProgramListAdapter.ProgramViewHolder.TIME_NORMAL;
+                    ? ProgramListAdapter.ProgramViewHolder.TIME_CURRENT
+                    : ProgramListAdapter.ProgramViewHolder.TIME_NORMAL;
             assertEquals("row " + index, expected, timeViewOf(holder).getCurrentTextColor());
         }
     }

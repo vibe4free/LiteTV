@@ -33,8 +33,8 @@ public class GroupRowLayoutTest {
 
     private LinearLayout buildRow(Context context) {
         RecyclerView recycler = new RecyclerView(context);
-        ChannelListComponent.GroupListAdapter adapter =
-                new ChannelListComponent.GroupListAdapter(context, new com.cabletv.player.config.ChannelNavigator());
+        GroupListAdapter adapter =
+                new GroupListAdapter(context, new com.cabletv.player.config.ChannelNavigator());
         return (LinearLayout) adapter.onCreateViewHolder(recycler, 0).itemView;
     }
 
