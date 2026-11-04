@@ -694,7 +694,13 @@ public class MainActivity extends Activity {
     /** Keeps the live thumb glued to "now" while the bar is open. */
     private void tickTimeShiftBar() {
         if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
-            mTimeShiftBar.tickIfIdle();
+            if (mCatchup.active) {
+                // A replay advances by itself: keep the thumb on the actual position instead of
+                // leaving it where the last seek put it.
+                mTimeShiftBar.setPlaybackPosition(currentPlayheadMs());
+            } else {
+                mTimeShiftBar.tickIfIdle();
+            }
             if (mTimeShiftBar.isPastLastProgramme()) {
                 // Live playback crossed into a programme the track had not been told about:
                 // without this the strip kept the old blocks and the programme name vanished.
@@ -725,7 +731,15 @@ public class MainActivity extends Activity {
         boolean active;
         Channel channel;
         EpgManager.Program program;
-        /** Programme start plus the accumulated seek offset, in epoch millis. */
+        /**
+         * Where the stream currently loaded was asked to start, in epoch millis.
+         *
+         * <p>Not the same as "where playback is now": a replay keeps playing, so the live
+         * position is this plus the player's own progress. Using a frozen value as the base of
+         * the next seek is what made a step forward land behind where the viewer already was.
+         */
+        long streamStartMs;
+        /** Last known playhead, kept as a fallback when the player cannot report a position. */
         long playheadMs;
         /** The span of the replay window; it can cover several programmes. */
         long windowStartMs;
@@ -788,7 +802,7 @@ public class MainActivity extends Activity {
             long end = Math.max(now, mCatchup.playheadMs);
             mTimeShiftBar.setChannelLabel(channel.name);
             mTimeShiftBar.setBackToLiveVisible(true);
-            mTimeShiftBar.setWindow(start, end, mCatchup.playheadMs);
+            mTimeShiftBar.setWindow(start, end, currentPlayheadMs());
             mTimeShiftBar.setPrograms(timelineSegments(channel, start, end));
             // A replay does not follow the broadcast, so the ticker must not move the playhead.
             mTimeShiftBar.setLiveMode(false, now);
@@ -1153,6 +1167,7 @@ public class MainActivity extends Activity {
         mCatchup.channel = channel;
         mCatchup.program = program;
         mCatchup.playheadMs = playheadMs;
+        mCatchup.streamStartMs = playheadMs;
         // The strip draws the playhead inside this span, so it must contain it by construction.
         mCatchup.windowStartMs = Math.min(windowStartMs, playheadMs);
         mCatchup.windowEndMs = Math.max(windowEndMs, playheadMs);
@@ -1187,10 +1202,30 @@ public class MainActivity extends Activity {
         if (!mCatchup.active || mCatchup.channel == null || mCatchup.program == null) {
             return;
         }
-        long now = System.currentTimeMillis();
-        long target = Math.max(mCatchup.windowStartMs,
-                Math.min(now - CATCHUP_SEEK_STEP_MS, mCatchup.playheadMs + deltaMs));
+        long target = currentPlayheadMs() + deltaMs;
         seekCatchupTo(target);
+    }
+
+    /**
+     * Where the replay is playing right now.
+     *
+     * <p>Derived from the start of the stream the player was given plus its own progress, not
+     * from a stored value: a replay advances on its own, so anything stored goes stale the moment
+     * the viewer watches for a while. Falls back to the stored value while the player is
+     * buffering or has not reported a position yet.
+     */
+    private long currentPlayheadMs() {
+        if (!mCatchup.active) {
+            return 0;
+        }
+        long now = System.currentTimeMillis();
+        long played = mVideoView == null ? 0 : mVideoView.getCurrentPosition();
+        long base = mCatchup.streamStartMs > 0 ? mCatchup.streamStartMs : mCatchup.playheadMs;
+        long position = played > 0 ? base + played : mCatchup.playheadMs;
+        long min = mCatchup.windowStartMs > 0 ? mCatchup.windowStartMs
+                : (mCatchup.program != null ? mCatchup.program.startTime : position);
+        long max = now - CATCHUP_SEEK_STEP_MS;
+        return Math.max(min, Math.min(max, position));
     }
 
     /** Seeks the catchup playhead to an absolute position within the programme window. */
@@ -1203,10 +1238,13 @@ public class MainActivity extends Activity {
                 : mCatchup.program.startTime;
         long maxPlayhead = now - CATCHUP_SEEK_STEP_MS;
         long target = Math.max(minPlayhead, Math.min(targetMs, maxPlayhead));
-        if (target == mCatchup.playheadMs) {
+        // Compared against where the stream starts, not against the live position: seeking to the
+        // same moment twice in a row is still a request to restart it there.
+        if (target == mCatchup.streamStartMs && mCatchup.streamStartMs > 0) {
             return;
         }
         mCatchup.playheadMs = target;
+        mCatchup.streamStartMs = target;
         // Stepping into the programme next door makes that one the replay being watched, so the
         // name on screen and the guide focus follow the playhead.
         EpgManager.Program covering = programAt(mCatchup.channel, target);

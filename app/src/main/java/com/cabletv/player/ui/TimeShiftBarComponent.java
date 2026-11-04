@@ -436,6 +436,25 @@ public class TimeShiftBarComponent extends FrameLayout {
     }
 
     /**
+     * Moves the thumb to where playback actually is, without touching auto-hide or visibility.
+     *
+     * <p>A replay advances on its own, so the strip has to follow it; rebuilding the whole window
+     * every second would keep resetting the countdown that hides the strip.
+     */
+    public void setPlaybackPosition(long positionMs) {
+        if (mDragging) {
+            return;
+        }
+        long clamped = Math.max(mWindowStartMs, Math.min(mWindowEndMs, positionMs));
+        if (clamped == mPositionMs) {
+            return;
+        }
+        mPositionMs = clamped;
+        mTimeline.setPosition(mPositionMs);
+        updateLabels();
+    }
+
+    /**
      * Keeps the thumb advancing with real time, and only that.
      *
      * <p>While a catchup is running the playhead belongs to the viewer, so the ticker leaves it
