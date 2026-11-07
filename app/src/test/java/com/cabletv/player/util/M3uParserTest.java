@@ -30,6 +30,60 @@ public class M3uParserTest {
             + "#EXTINF:-1,新闻\r\n"
             + "http://stream/xinwen\r\n";
 
+    /**
+     * Playlists in the wild separate guide addresses with commas as often as with spaces. A comma
+     * left attached to an address makes the download fail, and nothing says why -- the guide is
+     * just empty.
+     */
+    /**
+     * VLC puts its options above the entry they belong to; they used to be dropped there because
+     * no channel existed yet, and the source then failed on a server that wants a user agent.
+     */
+    @Test
+    public void vlcOptionsBeforeTheEntryBelongToThatEntry() {
+        String playlist = "#EXTM3U\n"
+                + "#EXTVLCOPT:http-user-agent=BeforeUA\n"
+                + "#EXTINF:-1,First\nhttp://s/1\n"
+                + "#EXTINF:-1,Second\nhttp://s/2\n";
+
+        java.util.List<ChannelGroup> groups = M3uParser.parse(playlist);
+
+        Channel first = groups.get(0).channels.get(0);
+        Channel second = groups.get(0).channels.get(1);
+        assertEquals("BeforeUA", first.headers.get("User-Agent"));
+        assertTrue("the option must not leak into the next channel",
+                second.headers == null || !second.headers.containsKey("User-Agent"));
+    }
+
+    @Test
+    public void epgUrls_separatedByCommasAreAllReadable() {
+        String playlist = "#EXTM3U x-tvg-url=\"https://a.example/e1.xml.gz, https://b.example/e2.xml.gz,"
+                + "https://c.example/e3.xml.gz\"\n"
+                + "#EXTINF:-1,One\nhttp://s/1\n";
+
+        java.util.List<String> urls = M3uParser.parseEpgUrls(playlist, "https://list.example/p.m3u");
+
+        assertEquals(3, urls.size());
+        assertEquals("https://a.example/e1.xml.gz", urls.get(0));
+        assertEquals("https://b.example/e2.xml.gz", urls.get(1));
+        assertEquals("https://c.example/e3.xml.gz", urls.get(2));
+    }
+
+    @Test
+    public void epgUrls_mixedSeparatorsAndTrailingPunctuationAreHandled() {
+        String playlist = "#EXTM3U url-tvg=\"https://a.example/e1.xml.gz, "
+                + "https://b.example/e2.xml.gz;https://c.example/e3.xml.gz\"\n"
+                + "#EXTINF:-1,One\nhttp://s/1\n";
+
+        java.util.List<String> urls = M3uParser.parseEpgUrls(playlist, "https://list.example/p.m3u");
+
+        assertEquals(3, urls.size());
+        for (String url : urls) {
+            assertTrue("trailing punctuation must not survive: " + url,
+                    url.endsWith(".xml.gz"));
+        }
+    }
+
     @Test
     public void parse_m3uWithAttributes_extractsChannelFields() {
         List<ChannelGroup> groups = M3uParser.parse(FULL_M3U);

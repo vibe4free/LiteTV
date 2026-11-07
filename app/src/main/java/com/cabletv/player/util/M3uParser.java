@@ -155,7 +155,9 @@ public class M3uParser {
         List<String> urls = new ArrayList<>();
         Matcher matcher = EPG_URL_ATTR_PATTERN.matcher(header);
         while (matcher.find() && urls.size() < MAX_EPG_URLS) {
-            for (String raw : matcher.group(1).split("[\\s|]+")) {
+            // Playlists separate several guide addresses with spaces, "|" or commas; a comma
+            // left on the end of an address makes it useless, so it counts as a separator too.
+            for (String raw : matcher.group(1).split("[\\s|,;]+")) {
                 String url = resolveEpgUrl(raw.trim(), playlistUrl);
                 if (url != null && !urls.contains(url)) {
                     urls.add(url);
@@ -170,6 +172,9 @@ public class M3uParser {
 
     /** @return an http(s) EPG URL, or null when the value is unusable. */
     private static String resolveEpgUrl(String value, String playlistUrl) {
+        // Trailing punctuation survives splitting in some generated playlists and would break the
+        // download silently ("...xml.gz," is not a URL).
+        value = value.replaceAll("^[\"'\\s]+|[\"'\\s]+$", "");
         if (value.isEmpty()) {
             return null;
         }
@@ -202,6 +207,10 @@ public class M3uParser {
         String defaultCatchupType = "";
         String defaultCatchupSource = "";
         String defaultCatchupReplace = "";
+        // VLC options may sit above the #EXTINF line they belong to. They are collected here and
+        // applied once the channel exists, instead of being dropped because there was no channel
+        // to attach them to yet.
+        List<String> leadingVlcOptions = new ArrayList<>();
 
         try {
             while ((line = reader.readLine()) != null) {
@@ -229,6 +238,10 @@ public class M3uParser {
                     }
                     pendingChannel.logo = extractPattern(line, TVG_LOGO_PATTERN);
                     pendingChannel.tvgId = extractPattern(line, TVG_ID_PATTERN);
+                    for (String option : leadingVlcOptions) {
+                        applyVlcOption(pendingChannel, option);
+                    }
+                    leadingVlcOptions.clear();
                     putHeader(pendingChannel, HEADER_USER_AGENT,
                             extractPattern(line, HTTP_USER_AGENT_PATTERN));
                     putHeader(pendingChannel, HEADER_REFERER,
@@ -245,8 +258,13 @@ public class M3uParser {
 
                 // VLC carries the same information on its own option lines, which some
                 // generators emit instead of the #EXTINF attributes.
-                if (line.startsWith("#EXTVLCOPT:") && pendingChannel != null) {
-                    applyVlcOption(pendingChannel, line.substring("#EXTVLCOPT:".length()));
+                if (line.startsWith("#EXTVLCOPT:")) {
+                    String option = line.substring("#EXTVLCOPT:".length());
+                    if (pendingChannel != null) {
+                        applyVlcOption(pendingChannel, option);
+                    } else {
+                        leadingVlcOptions.add(option);
+                    }
                     continue;
                 }
 
