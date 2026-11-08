@@ -32,7 +32,7 @@ public class ChannelNumberView extends LinearLayout {
         addView(mDigitsView, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         mNameView = new TextView(context);
-        mNameView.setTextColor(0xFFFF9966);
+        mNameView.setTextColor(0xFF00E5FF);
         mNameView.setTextSize(14);
         mNameView.setMaxLines(1);
         mNameView.setGravity(Gravity.CENTER);
@@ -61,7 +61,7 @@ public class ChannelNumberView extends LinearLayout {
             mNameView.setTextColor(0xFF999999);
         } else {
             mNameView.setText(channelName);
-            mNameView.setTextColor(0xFFFF9966);
+            mNameView.setTextColor(0xFF00E5FF);
         }
         setVisibility(VISIBLE);
         bringToFront();

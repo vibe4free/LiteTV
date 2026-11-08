@@ -58,7 +58,9 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
     private int mCurrentChannelIndex = 0;
     private int mSelectedChannelIndex = 0;
     private int mSelectedProgramIndex = 0;
+    private TextView mPrevDayView;
     private TextView mProgramTitleView;
+    private TextView mNextDayView;
     /**
      * Guide day currently shown, relative to today: 0 = today, -1 = yesterday, ... -6.
      * Navigated with LEFT/RIGHT while the programme column has focus.
@@ -118,23 +120,24 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         // The menu is only as wide as the columns currently on screen: the group column is folded
         // away until asked for, and the programme column comes and goes with the EPG data.
         setLayoutParams(new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
-        setBackgroundResource(R.drawable.gradient_sidebar_bg);
+        setBackgroundColor(0x00000000);
 
         LinearLayout mainContainer = new LinearLayout(context);
         mainContainer.setOrientation(LinearLayout.HORIZONTAL);
         mainContainer.setLayoutParams(new FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT));
 
-        // Group list section (far left, fixed width, hidden until LEFT is pressed)
+        // Group list section (far left, generous width so Chinese group names never wrap or ellipsize)
         LinearLayout groupSection = new LinearLayout(context);
         mGroupSection = groupSection;
         groupSection.setOrientation(LinearLayout.VERTICAL);
-        groupSection.setLayoutParams(new LinearLayout.LayoutParams(dp2px(130), LayoutParams.MATCH_PARENT));
+        groupSection.setLayoutParams(new LinearLayout.LayoutParams(dp2px(176), LayoutParams.MATCH_PARENT));
         groupSection.setVisibility(GONE);
 
         TextView groupTitle = new TextView(context);
         groupTitle.setText(R.string.groups);
-        groupTitle.setTextColor(0xFFFFFFFF);
-        groupTitle.setTextSize(16);
+        groupTitle.setTextColor(0xFF00E5FF);
+        groupTitle.setTextSize(15);
+        groupTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         groupTitle.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(12));
         groupTitle.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
         groupSection.addView(groupTitle);
@@ -159,8 +162,9 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         // only thing telling the viewer which list they are looking at.
         mTitleView = new TextView(context);
         mTitleView.setText(R.string.channel_list);
-        mTitleView.setTextColor(0xFFFFFFFF);
-        mTitleView.setTextSize(16);
+        mTitleView.setTextColor(0xFF00E5FF);
+        mTitleView.setTextSize(15);
+        mTitleView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         mTitleView.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(12));
         mTitleView.setSingleLine();
         mTitleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -193,14 +197,43 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mProgramListContainer.setLayoutParams(new LinearLayout.LayoutParams(dp2px(372), LayoutParams.MATCH_PARENT));
         mProgramListContainer.setVisibility(GONE);
 
-        TextView programTitle = new TextView(context);
-        programTitle.setText(R.string.todays_programs);
-        programTitle.setTextColor(0xFFFFFFFF);
-        programTitle.setTextSize(14);
-        programTitle.setPadding(dp2px(12), dp2px(12), dp2px(12), dp2px(8));
-        programTitle.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
-        mProgramTitleView = programTitle;
-        mProgramListContainer.addView(programTitle);
+        // 3-Day Segmented Date Tabs (Yesterday | Today · LIVE | Tomorrow)
+        LinearLayout dateTabsBar = new LinearLayout(context);
+        dateTabsBar.setOrientation(LinearLayout.HORIZONTAL);
+        dateTabsBar.setGravity(Gravity.CENTER_VERTICAL);
+        dateTabsBar.setBackgroundResource(R.drawable.bg_date_tabs_bar);
+        LinearLayout.LayoutParams dateLp = new LinearLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, dp2px(36));
+        dateLp.setMargins(dp2px(10), dp2px(8), dp2px(10), dp2px(4));
+        dateTabsBar.setLayoutParams(dateLp);
+        dateTabsBar.setPadding(dp2px(3), dp2px(2), dp2px(3), dp2px(2));
+
+        mPrevDayView = new TextView(context);
+        mPrevDayView.setGravity(Gravity.CENTER);
+        mPrevDayView.setTextSize(11);
+        mPrevDayView.setTextColor(0xFF94A3B8);
+        mPrevDayView.setSingleLine(true);
+        mPrevDayView.setOnClickListener(v -> moveProgramDay(-1));
+        dateTabsBar.addView(mPrevDayView, new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1.0f));
+
+        mProgramTitleView = new TextView(context);
+        mProgramTitleView.setGravity(Gravity.CENTER);
+        mProgramTitleView.setTextSize(12);
+        mProgramTitleView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        mProgramTitleView.setTextColor(0xFF00E5FF);
+        mProgramTitleView.setBackgroundResource(R.drawable.bg_date_capsule);
+        mProgramTitleView.setSingleLine(true);
+        dateTabsBar.addView(mProgramTitleView, new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1.25f));
+
+        mNextDayView = new TextView(context);
+        mNextDayView.setGravity(Gravity.CENTER);
+        mNextDayView.setTextSize(11);
+        mNextDayView.setTextColor(0xFF94A3B8);
+        mNextDayView.setSingleLine(true);
+        mNextDayView.setOnClickListener(v -> moveProgramDay(1));
+        dateTabsBar.addView(mNextDayView, new LinearLayout.LayoutParams(0, LayoutParams.MATCH_PARENT, 1.0f));
+
+        mProgramListContainer.addView(dateTabsBar);
 
         mProgramRecyclerView = new RecyclerView(context);
         mProgramRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
@@ -221,21 +254,30 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
      */
     public void applyOpacity() {
         int level = AppConfig.getSidebarOpacity();
-        setAlpha(level == AppConfig.SIDEBAR_TRANSLUCENT ? 0.75f : 1f);
+        setAlpha(1f);
         int channelBg;
         int programBg;
+        int groupBg;
         switch (level) {
             case AppConfig.SIDEBAR_OPAQUE:
-                channelBg = 0xFF0D1117;
-                programBg = 0xFF080B0F;
+                channelBg = 0xFF0D111A;
+                programBg = 0xFF080D14;
+                groupBg = 0xFF11161D;
+                setBackgroundColor(0xFF0D111A);
                 break;
             case AppConfig.SIDEBAR_SEMI_OPAQUE:
-                channelBg = 0x990D1117;
-                programBg = 0xB3080B0F;
+                // Enhanced semi-opaque: deep obsidian tint (~85%-90% opacity)
+                channelBg = 0xE00D111A;
+                programBg = 0xE6080D14;
+                groupBg = 0xD911161D;
+                setBackgroundColor(0x00000000);
                 break;
-            default:
-                channelBg = 0x33000000;
-                programBg = 0x66000000;
+            default: // SIDEBAR_TRANSLUCENT
+                // Enhanced translucent: solid enough for crisp contrast (~65%-75% opacity)
+                channelBg = 0xB30D111A;
+                programBg = 0xC0080D14;
+                groupBg = 0xA611161D;
+                setBackgroundColor(0x00000000);
                 break;
         }
         if (mChannelSection != null) {
@@ -245,10 +287,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
             mProgramListContainer.setBackgroundColor(programBg);
         }
         if (mGroupSection != null) {
-            // The group column has no colour of its own; at full opacity it needs one, or the video
-            // would show through the one panel that is meant to sit furthest from it.
-            mGroupSection.setBackgroundColor(level == AppConfig.SIDEBAR_TRANSLUCENT ? 0x00000000
-                    : (level == AppConfig.SIDEBAR_OPAQUE ? 0xFF11161D : 0x9911161D));
+            mGroupSection.setBackgroundColor(groupBg);
         }
     }
 
@@ -437,6 +476,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         }
         List<EpgManager.Program> dayPrograms = filterProgramsForDay(programs, mDayOffset);
         ProgramListAdapter programAdapter = new ProgramListAdapter(getContext(), dayPrograms, mLabelScroller);
+        programAdapter.setChannel(selectedChannel);
         mProgramAdapterRef = programAdapter;
         programAdapter.setRowClickListener(this::onProgramRowTap);
         mProgramRecyclerView.setAdapter(programAdapter);
@@ -564,15 +604,43 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         if (mProgramTitleView == null) {
             return;
         }
-        if (mDayOffset == 0) {
-            mProgramTitleView.setText(R.string.todays_programs);
-        } else if (mDayOffset == -1) {
-            mProgramTitleView.setText(R.string.yesterday_programs);
+        int prevOffset = mDayOffset - 1;
+        int currOffset = mDayOffset;
+        int nextOffset = mDayOffset + 1;
+
+        // Middle: Current Selected Day (Focused Capsule)
+        mProgramTitleView.setText(formatDayLabel(currOffset));
+
+        // Left: Previous Day
+        if (mPrevDayView != null) {
+            boolean hasPrev = mAvailableDayOffsets.contains(prevOffset);
+            mPrevDayView.setText(formatDayLabel(prevOffset));
+            mPrevDayView.setTextColor(hasPrev ? 0xFF94A3B8 : 0xFF475569);
+            mPrevDayView.setClickable(hasPrev);
+        }
+
+        // Right: Next Day
+        if (mNextDayView != null) {
+            boolean hasNext = mAvailableDayOffsets.contains(nextOffset);
+            mNextDayView.setText(formatDayLabel(nextOffset));
+            mNextDayView.setTextColor(hasNext ? 0xFF94A3B8 : 0xFF475569);
+            mNextDayView.setClickable(hasNext);
+        }
+    }
+
+    private String formatDayLabel(int offset) {
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.add(java.util.Calendar.DAY_OF_YEAR, offset);
+        SimpleDateFormat sdf = new SimpleDateFormat("MM-dd", Locale.getDefault());
+        String dateStr = sdf.format(cal.getTime());
+        if (offset == 0) {
+            return getContext().getString(R.string.day_today) + " " + dateStr;
+        } else if (offset == -1) {
+            return getContext().getString(R.string.day_yesterday) + " " + dateStr;
+        } else if (offset == 1) {
+            return getContext().getString(R.string.day_tomorrow) + " " + dateStr;
         } else {
-            java.util.Calendar day = java.util.Calendar.getInstance();
-            day.add(java.util.Calendar.DAY_OF_YEAR, mDayOffset);
-            mProgramTitleView.setText(
-                    java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(day.getTime()));
+            return dateStr;
         }
     }
 

@@ -43,7 +43,6 @@ public class MainActivity extends Activity {
     private ChannelNavigator mNavigator;
     private EpgManager mEpgManager;
     private ChannelListComponent mChannelListComponent;
-    private PlaybackInfoComponent mPlaybackInfoComponent;
     private PlaybackStatusView mPlaybackStatusView;
     private ChannelNumberView mChannelNumberView;
     private TimeShiftBarComponent mTimeShiftBar;
@@ -175,29 +174,11 @@ public class MainActivity extends Activity {
             }
         }
 
-        // Add bottom playback info bar
-        mPlaybackInfoComponent = new PlaybackInfoComponent(this);
-        mPlaybackInfoComponent.setEpgManager(mEpgManager);
-        FrameLayout.LayoutParams infoBarlp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                dp2px(100));
-        infoBarlp.gravity = android.view.Gravity.BOTTOM;
-        mPlaybackInfoComponent.setLayoutParams(infoBarlp);
-        rootView.addView(mPlaybackInfoComponent);
-        // On phones the info bar is the doorway to the channel list: tap it to open the menu.
-        mPlaybackInfoComponent.setClickable(true);
-        mPlaybackInfoComponent.setOnClickListener(v -> {
-            if (!mChannelListVisible) {
-                mChannelListVisible = true;
-                showChannelList();
-            }
-        });
-
         // Centred status message for buffering / reconnect / playback failure
         mPlaybackStatusView = new PlaybackStatusView(this);
         rootView.addView(mPlaybackStatusView, mPlaybackStatusView.createCenteredLayoutParams());
 
-        // Draggable time-shift seek bar, floating just above the playback info strip
+        // Unified bottom playback & time-shift HUD
         mTimeShiftBar = new TimeShiftBarComponent(this);
         mTimeShiftBar.setOnSeekListener(new TimeShiftBarComponent.OnSeekListener() {
             @Override
@@ -210,7 +191,16 @@ public class MainActivity extends Activity {
                 exitCatchupToLive();
             }
         });
+        mTimeShiftBar.setOnClickListener(v -> {
+            if (!mChannelListVisible) {
+                mChannelListVisible = true;
+                showChannelList();
+            }
+        });
         rootView.addView(mTimeShiftBar, mTimeShiftBar.createBottomLayoutParams());
+        if (mEpgManager != null) {
+            mEpgManager.addOnEpgUpdatedListener(() -> runOnUiThread(() -> refreshTimeShiftBar(false)));
+        }
 
         // The replay badge: a corner mark, so a paused viewer coming back to the television can
         // tell a replay from live TV at a glance.
@@ -541,13 +531,9 @@ public class MainActivity extends Activity {
             mChannelListVisible = false;
             return;
         }
-        if (mTimeShiftBar.getVisibility() == View.VISIBLE) {
+        if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
             mTimeShiftBar.hideSmooth();
             return;
-        }
-        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
-        if (channel != null && mPlaybackInfoComponent != null) {
-            mPlaybackInfoComponent.showChannelInfo(channel);
         }
         refreshTimeShiftBar(true);
     }
@@ -694,16 +680,30 @@ public class MainActivity extends Activity {
     /** Keeps the live thumb glued to "now" while the bar is open. */
     private void tickTimeShiftBar() {
         if (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE) {
-            if (mCatchup.active) {
-                // A replay advances by itself: keep the thumb on the actual position instead of
-                // leaving it where the last seek put it.
-                mTimeShiftBar.setPlaybackPosition(currentPlayheadMs());
-            } else {
+            long now = System.currentTimeMillis();
+            Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+            if (mCatchup.active && channel != null) {
+                long playhead = currentPlayheadMs();
+                if (mCatchup.program != null && playhead >= mCatchup.program.endTime) {
+                    EpgManager.Program next = programAt(channel, playhead);
+                    if (next != null && next != mCatchup.program) {
+                        mCatchup.program = next;
+                        EpgManager.Program afterNext = getProgramAfter(channel, next.endTime);
+                        mTimeShiftBar.setProgramInfo(next.title, afterNext != null ? afterNext.title : "");
+                        mTimeShiftBar.setWindow(next.startTime, next.endTime, playhead);
+                    }
+                }
+                mTimeShiftBar.setPlaybackPosition(playhead);
+            } else if (channel != null) {
+                EpgManager.Program current = mEpgManager.getCurrentProgram(channel);
+                if (current != null && (now >= mTimeShiftBar.getWindowEnd() || now < mTimeShiftBar.getWindowStart())) {
+                    String nextTitle = mEpgManager.getNextProgramInfo(channel);
+                    mTimeShiftBar.setProgramInfo(current.title, nextTitle != null ? nextTitle : "");
+                    mTimeShiftBar.setWindow(current.startTime, current.endTime, now);
+                }
                 mTimeShiftBar.tickIfIdle();
             }
             if (mTimeShiftBar.isPastLastProgramme()) {
-                // Live playback crossed into a programme the track had not been told about:
-                // without this the strip kept the old blocks and the programme name vanished.
                 Log.d(TAG, "Time-shift bar passed the last known programme, refreshing");
                 refreshTimeShiftBar();
             }
@@ -765,18 +765,13 @@ public class MainActivity extends Activity {
         }
         boolean show = mCatchup.active && AppConfig.isCatchupBadgeEnabled();
         mCatchupBadge.setVisibility(show ? View.VISIBLE : View.GONE);
-        if (mPlaybackInfoComponent != null) {
-            // The strip makes room for the badge instead of being covered by it.
-            mPlaybackInfoComponent.setLeadingInsetDp(show ? BADGE_INSET_DP : 16);
-        }
     }
 
     /**
-     * Repaints the time-shift bar for the current playback position.
+     * Repaints the unified bottom HUD for the current playback position.
      *
      * @param forceShow live mode only: the bar normally stays hidden until the user taps the
-     *                  video, so it never sits over TV playback uninvited. Catchup always shows
-     *                  it because the drag IS the way to seek a replay.
+     *                  video or presses a key, so it never sits over TV playback uninvited.
      */
     private void refreshTimeShiftBar(boolean forceShow) {
         updateCatchupBadge();
@@ -789,43 +784,64 @@ public class MainActivity extends Activity {
             return;
         }
         long now = System.currentTimeMillis();
+        mTimeShiftBar.setChannelInfo(channel.name, mCurrentChannelIndex + 1,
+                mCurrentUrlIndex + 1, channel.urlCount(), channel.logo);
+
         if (mCatchup.active && mCatchup.program != null) {
-            // The strip shows the whole replay window, not just the programme under the
-            // playhead: that is what makes stepping into the neighbouring programme visible.
-            long start = mCatchup.windowStartMs > 0
-                    ? Math.min(mCatchup.windowStartMs, mCatchup.playheadMs)
-                    : mCatchup.program.startTime;
-            // The strip ends at "now", the same edge live playback ends at. The eight hour tail
-            // in the playseek URL is about keeping the stream flowing, not about the window the
-            // viewer is looking at -- including it here made the thumb jump to the middle of the
-            // screen the moment a replay started.
-            long end = Math.max(now, mCatchup.playheadMs);
-            mTimeShiftBar.setChannelLabel(channel.name);
+            EpgManager.Program prog = mCatchup.program;
+            long start = prog.startTime;
+            long end = prog.endTime;
+            long playhead = currentPlayheadMs();
+
+            EpgManager.Program nextProg = getProgramAfter(channel, prog.endTime);
+            String nextTitle = nextProg != null ? nextProg.title : "";
+
+            mTimeShiftBar.setProgramInfo(prog.title, nextTitle);
             mTimeShiftBar.setBackToLiveVisible(true);
-            mTimeShiftBar.setWindow(start, end, currentPlayheadMs());
-            mTimeShiftBar.setPrograms(timelineSegments(channel, start, end));
-            // A replay does not follow the broadcast, so the ticker must not move the playhead.
             mTimeShiftBar.setLiveMode(false, now);
+            mTimeShiftBar.setWindow(start, end, playhead);
+            mTimeShiftBar.setPrograms(timelineSegments(channel, start, end));
             mTimeShiftBar.show();
             startTimeShiftTicker();
             return;
         }
-        if (!channel.hasCatchup()) {
-            mTimeShiftBar.hide();
-            return;
+
+        EpgManager.Program currentProg = mEpgManager.getCurrentProgram(channel);
+        String nextTitle = mEpgManager.getNextProgramInfo(channel);
+        if (currentProg != null) {
+            long start = currentProg.startTime;
+            long end = currentProg.endTime;
+            mTimeShiftBar.setProgramInfo(currentProg.title, nextTitle != null ? nextTitle : "");
+            mTimeShiftBar.setBackToLiveVisible(false);
+            mTimeShiftBar.setLiveMode(true, now);
+            mTimeShiftBar.setWindow(start, end, now);
+            mTimeShiftBar.setPrograms(timelineSegments(channel, start, end));
+        } else {
+            long start = now - TIMESHIFT_NO_EPG_WINDOW_MS;
+            long end = now;
+            mTimeShiftBar.setProgramInfo(getString(R.string.no_epg_data), "");
+            mTimeShiftBar.setBackToLiveVisible(false);
+            mTimeShiftBar.setLiveMode(true, now);
+            mTimeShiftBar.setWindow(start, end, now);
         }
-        // Live: the window runs from the programme start to now.
-        long start = timeShiftWindowStart(channel);
-        mTimeShiftBar.setChannelLabel(channel.name);
-        mTimeShiftBar.setBackToLiveVisible(false);
-        mTimeShiftBar.setWindow(start, now, now);
-        mTimeShiftBar.setPrograms(timelineSegments(channel, start, now + 6 * 60 * 60 * 1000L));
-        // Watching live: the playhead follows the broadcast and the right end is the live edge.
-        mTimeShiftBar.setLiveMode(true, now);
+
         if (forceShow) {
             mTimeShiftBar.show();
             startTimeShiftTicker();
         }
+    }
+
+    private EpgManager.Program getProgramAfter(Channel channel, long timeMs) {
+        List<EpgManager.Program> programs = mEpgManager.getAllPrograms(channel);
+        if (programs == null || programs.isEmpty()) {
+            return null;
+        }
+        for (EpgManager.Program program : programs) {
+            if (program != null && program.startTime >= timeMs) {
+                return program;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1020,8 +1036,34 @@ public class MainActivity extends Activity {
         }
         if (mTimeShiftBar != null) {
             mTimeShiftBar.showSeekPreview(SEEK_RATES[mSeekRateIndex], mSeekAccumulatedMs);
+            checkSeekBoundaryCrossing(mSeekAccumulatedMs);
         }
         mMainHandler.postDelayed(mSeekRateRunnable, SEEK_RATE_TICK_MS);
+    }
+
+    private void checkSeekBoundaryCrossing(long deltaMs) {
+        Channel channel = mChannelRepository.getChannel(mCurrentChannelIndex);
+        if (channel == null || mTimeShiftBar == null) {
+            return;
+        }
+        long base = mCatchup.active ? currentPlayheadMs() : System.currentTimeMillis();
+        long targetMs = base + deltaMs;
+        long winStart = mTimeShiftBar.getWindowStart();
+        long winEnd = mTimeShiftBar.getWindowEnd();
+
+        if (winStart > 0 && winEnd > winStart && (targetMs < winStart || targetMs > winEnd)) {
+            EpgManager.Program covering = programAt(channel, targetMs);
+            if (covering != null) {
+                if (mCatchup.active) {
+                    mCatchup.program = covering;
+                }
+                EpgManager.Program nextProg = getProgramAfter(channel, covering.endTime);
+                mTimeShiftBar.setProgramInfo(covering.title, nextProg != null ? nextProg.title : "");
+                mTimeShiftBar.setWindow(covering.startTime, covering.endTime, targetMs);
+            }
+        } else {
+            mTimeShiftBar.setPlaybackPosition(targetMs);
+        }
     }
 
     /**
@@ -1187,13 +1229,7 @@ public class MainActivity extends Activity {
                 mChannelListComponent.setCurrentChannel(mCurrentChannelIndex);
             }
         });
-        if (mPlaybackInfoComponent != null) {
-            mPlaybackInfoComponent.showChannelInfo(channel);
-        }
-        refreshTimeShiftBar();
-        android.widget.Toast.makeText(this,
-                getString(R.string.catchup_started, program.title),
-                android.widget.Toast.LENGTH_SHORT).show();
+        refreshTimeShiftBar(true);
         mEpgManager.loadEpg(channel);
     }
 
@@ -1676,6 +1712,9 @@ public class MainActivity extends Activity {
         }
     }
 
+    private long mLastBackPressTime = 0;
+    private static final long BACK_DOUBLE_CLICK_INTERVAL_MS = 600L;
+
     private void handleBack() {
         if (mSettingsPanel != null && mSettingsPanel.isPanelVisible()) {
             // The panel is a layer over the player, so BACK takes it off before anything else.
@@ -1694,28 +1733,57 @@ public class MainActivity extends Activity {
         } else if (mChannelListVisible) {
             hideChannelList();
             mChannelListVisible = false;
-        } else if (mCatchup.active) {
-            exitCatchupToLive();
         } else {
-            showExitConfirmDialog();
+            long now = System.currentTimeMillis();
+            boolean isInfoBarVisible = (mTimeShiftBar != null && mTimeShiftBar.getVisibility() == View.VISIBLE);
+
+            if (now - mLastBackPressTime < BACK_DOUBLE_CLICK_INTERVAL_MS) {
+                // Double-click BACK: pop up exit confirmation dialog
+                mLastBackPressTime = 0;
+                if (isInfoBarVisible) {
+                    mTimeShiftBar.hide();
+                }
+                showExitConfirmDialog();
+            } else {
+                mLastBackPressTime = now;
+                if (isInfoBarVisible) {
+                    // In info bar visible state: return to live if in catchup, or hide info bar if live
+                    if (mCatchup.active) {
+                        exitCatchupToLive();
+                    } else {
+                        mTimeShiftBar.hideSmooth();
+                    }
+                } else {
+                    // Single press when info bar is hidden: show bottom HUD (without toast)
+                    refreshTimeShiftBar(true);
+                }
+            }
         }
     }
 
-    /** Asks before leaving the player, with the confirm button focused by default. */
+    /** Asks before leaving the player, using a modern obsidian styled dialog. */
     private void showExitConfirmDialog() {
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.exit_confirm_title)
-                .setMessage(R.string.exit_confirm_message)
-                .setPositiveButton(R.string.exit_confirm, (d, which) -> finish())
-                .setNegativeButton(R.string.exit_cancel, (d, which) -> d.dismiss())
-                .create();
-        dialog.show();
-        // Default the focus to "同意退出" so a single OK confirms; LEFT/RIGHT moves to
-        // 取消 and BACK dismisses the dialog without leaving the app.
-        Button confirm = dialog.getButton(DialogInterface.BUTTON_POSITIVE);
-        if (confirm != null) {
-            confirm.requestFocus();
+        android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.setContentView(R.layout.dialog_exit_confirm);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(
+                    android.graphics.Color.TRANSPARENT));
+            dialog.getWindow().setDimAmount(0.7f);
         }
+        android.widget.Button btnCancel = dialog.findViewById(R.id.btn_cancel);
+        android.widget.Button btnConfirm = dialog.findViewById(R.id.btn_confirm);
+
+        if (btnCancel != null) {
+            btnCancel.setOnClickListener(v -> dialog.dismiss());
+        }
+        if (btnConfirm != null) {
+            btnConfirm.setOnClickListener(v -> {
+                dialog.dismiss();
+                finish();
+            });
+            btnConfirm.requestFocus();
+        }
+        dialog.show();
     }
 
     private void playChannel(int index) {
@@ -1739,10 +1807,7 @@ public class MainActivity extends Activity {
                 if (mChannelListComponent != null) {
                     mChannelListComponent.setCurrentChannel(index);
                 }
-                if (mPlaybackInfoComponent != null) {
-                    mPlaybackInfoComponent.showChannelInfo(channel);
-                }
-                refreshTimeShiftBar();
+                refreshTimeShiftBar(true);
             });
             // Save current channel for resume on next app startup
             AppConfig.setLastChannelUrl(url);
@@ -1914,6 +1979,12 @@ public class MainActivity extends Activity {
         // The settings now announce themselves (AppConfig.OnSettingsChangedListener), so there is
         // nothing to compare here; this is only the "player came back to the front" path.
         updateCatchupBadge();
+        if (mChannelListComponent != null) {
+            mChannelListComponent.applyOpacity();
+        }
+        if (mTimeShiftBar != null) {
+            mTimeShiftBar.applyOpacity();
+        }
     }
 
     /**
@@ -1956,6 +2027,14 @@ public class MainActivity extends Activity {
             Channel current = mChannelRepository.getChannel(mCurrentChannelIndex);
             if (current != null) {
                 mEpgManager.loadEpg(current);
+            }
+        }
+        if (keys.contains(AppConfig.SIDEBAR_OPACITY_KEY)) {
+            if (mChannelListComponent != null) {
+                mChannelListComponent.applyOpacity();
+            }
+            if (mTimeShiftBar != null) {
+                mTimeShiftBar.applyOpacity();
             }
         }
         updateCatchupBadge();

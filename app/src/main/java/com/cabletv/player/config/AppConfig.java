@@ -56,6 +56,11 @@ public class AppConfig {
         return keys.contains(EPG_URL_KEY) || keys.contains(EPG_PREFERENCE_KEY);
     }
 
+    /** Whether a change to these keys affects sidebar and HUD opacity. */
+    public static boolean affectsOpacity(java.util.Set<String> keys) {
+        return keys.contains(SIDEBAR_OPACITY_KEY);
+    }
+
     private static <T> T read(String key, T defaultValue) {
         return sStore.get(key, defaultValue);
     }
@@ -91,7 +96,7 @@ public class AppConfig {
     private static final String EPG_URL_KEY = "app_epg_url";
     private static final String WEB_SERVER_ENABLED_KEY = "app_web_server_enabled";
     private static final String WEB_SERVER_PORT_KEY = "app_web_server_port";
-    private static final String SIDEBAR_OPACITY_KEY = "app_sidebar_opacity";
+    public static final String SIDEBAR_OPACITY_KEY = "app_sidebar_opacity";
     private static final String M3U_FILE_PATH_KEY = "app_m3u_file_path";
     private static final String EPG_DISPLAY_KEY = "app_epg_display_enabled";
     private static final String EPG_CACHE_VALIDITY_HOURS_KEY = "app_epg_cache_hours";

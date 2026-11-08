@@ -1,0 +1,921 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Generate comprehensive high-fidelity SVG prototype specifications for LiteTV
+Includes 4 screens:
+  1. 3-Column Channel & EPG Guide (TV Sidebar)
+  2. Playback Info & TimeShift Catchup HUD
+  3. TV Modern Settings Panel
+  4. Modern Responsive Web Configuration Console
+Plus Design Tokens & Spec Annotations.
+"""
+
+import os
+
+SVG_WIDTH = 3840
+SVG_HEIGHT = 2240
+
+def build_svg():
+    svg = []
+    # Header
+    svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {SVG_WIDTH} {SVG_HEIGHT}" width="{SVG_WIDTH}" height="{SVG_HEIGHT}">')
+    
+    # Defs: Gradients, Filters, Styles
+    svg.append("""
+    <defs>
+        <!-- Fonts & Styles -->
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap');
+            text { font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+            .mono { font-family: 'JetBrains Mono', monospace; }
+        </style>
+
+        <!-- Glow Filters -->
+        <filter id="cyanGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="8" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+        <filter id="focusShadow" x="-10%" y="-10%" width="120%" height="130%">
+            <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.6"/>
+            <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#00E5FF" flood-opacity="0.35"/>
+        </filter>
+        <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%">
+            <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000000" flood-opacity="0.5"/>
+        </filter>
+        <filter id="panelEdgeGlow" x="-50%" y="0%" width="200%" height="100%">
+            <feGaussianBlur stdDeviation="3" result="blur"/>
+            <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+        </filter>
+
+        <!-- Background Gradients -->
+        <linearGradient id="canvasBg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#07090E" />
+            <stop offset="50%" stop-color="#0A0E17" />
+            <stop offset="100%" stop-color="#05070B" />
+        </linearGradient>
+
+        <linearGradient id="tvBgVideo" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#1A2639" />
+            <stop offset="50%" stop-color="#0E1724" />
+            <stop offset="100%" stop-color="#080C14" />
+        </linearGradient>
+
+        <linearGradient id="stadiumGrass" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#143D24" />
+            <stop offset="60%" stop-color="#0D2818" />
+            <stop offset="100%" stop-color="#08180E" />
+        </linearGradient>
+
+        <!-- UI Component Gradients -->
+        <linearGradient id="sidebarOpaqueBg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#0D111A" stop-opacity="0.96" />
+            <stop offset="85%" stop-color="#0D111A" stop-opacity="0.94" />
+            <stop offset="100%" stop-color="#0D111A" stop-opacity="0.88" />
+        </linearGradient>
+
+        <linearGradient id="focusCardGradient" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.22" />
+            <stop offset="60%" stop-color="#00E5FF" stop-opacity="0.08" />
+            <stop offset="100%" stop-color="#00E5FF" stop-opacity="0.02" />
+        </linearGradient>
+
+        <linearGradient id="cyanAccentGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#00E5FF" />
+            <stop offset="100%" stop-color="#00B0FF" />
+        </linearGradient>
+
+        <linearGradient id="orangeAccentGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#FF7A00" />
+            <stop offset="100%" stop-color="#FF5252" />
+        </linearGradient>
+
+        <linearGradient id="hudGlassGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#161F2E" stop-opacity="0.92" />
+            <stop offset="100%" stop-color="#0B1019" stop-opacity="0.96" />
+        </linearGradient>
+
+        <linearGradient id="progressGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#00E5FF" />
+            <stop offset="85%" stop-color="#00E5FF" />
+            <stop offset="100%" stop-color="#FF7A00" />
+        </linearGradient>
+
+        <linearGradient id="webCardGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#151C28" stop-opacity="0.95" />
+            <stop offset="100%" stop-color="#0E141E" stop-opacity="0.98" />
+        </linearGradient>
+    </defs>
+    """)
+
+    # Canvas Background
+    svg.append(f'<rect width="{SVG_WIDTH}" height="{SVG_HEIGHT}" fill="url(#canvasBg)" />')
+
+    # Overall Header & Banner
+    svg.append("""
+    <g id="MasterHeader" transform="translate(80, 50)">
+        <rect x="0" y="0" width="120" height="34" rx="8" fill="#00E5FF" fill-opacity="0.15" stroke="#00E5FF" stroke-width="1.5" />
+        <text x="60" y="22" fill="#00E5FF" font-size="14" font-weight="700" text-anchor="middle" letter-spacing="1">DESIGN SPEC</text>
+        <text x="140" y="26" fill="#FFFFFF" font-size="28" font-weight="800">LiteTV 现代极简全终端 UI 规范原型图</text>
+        <text x="750" y="25" fill="#64748B" font-size="16" font-weight="500">tvOS &amp; Modern Leanback 设计语言 · 遥控器优先 · 60 FPS 零开销架构 · Web 控制台响应式</text>
+        
+        <!-- Quick Stats Pill -->
+        <g transform="translate(3000, 0)">
+            <rect x="0" y="0" width="680" height="36" rx="18" fill="#111827" stroke="#1F2937" stroke-width="1" />
+            <circle cx="20" cy="18" r="5" fill="#00E676" />
+            <text x="36" y="23" fill="#E2E8F0" font-size="13" font-weight="600">4K 标称分辨率 1920×1080@2x</text>
+            <text x="240" y="23" fill="#64748B" font-size="13">|</text>
+            <text x="260" y="23" fill="#00E5FF" font-size="13" font-weight="600">强调色 #00E5FF</text>
+            <text x="400" y="23" fill="#64748B" font-size="13">|</text>
+            <text x="420" y="23" fill="#FF7A00" font-size="13" font-weight="600">时移/回看 #FF7A00</text>
+            <text x="560" y="23" fill="#64748B" font-size="13">|</text>
+            <text x="580" y="23" fill="#94A3B8" font-size="13">基底 #0D111A</text>
+        </g>
+    </g>
+    """)
+
+    # -------------------------------------------------------------
+    # SCREEN 1: 3-Column Channel & EPG Guide (Top-Left)
+    # Origin: (80, 110), Viewport: 1760x990 (Scaled from 1920x1080)
+    # Scale factor: 1760 / 1920 = 0.9166667
+    # -------------------------------------------------------------
+    svg.append("""
+    <g id="Screen1_ChannelGuide" transform="translate(80, 110)">
+        <!-- Artboard Frame -->
+        <rect width="1760" height="990" rx="16" fill="#000000" stroke="#1E293B" stroke-width="2" filter="url(#cardShadow)"/>
+        
+        <!-- Artboard Title Tag -->
+        <g transform="translate(24, -28)">
+            <rect x="0" y="0" width="340" height="24" rx="6" fill="#1E293B" />
+            <text x="12" y="16" fill="#00E5FF" font-size="12" font-weight="700">SCREEN 01 · 电视端三栏频道与节目单侧边栏</text>
+            <text x="250" y="16" fill="#94A3B8" font-size="12">TV Guide Overlay</text>
+        </g>
+
+        <!-- Simulated TV Video Background (High-res Nature/Landscape) -->
+        <rect x="0" y="0" width="1760" height="990" rx="16" fill="url(#tvBgVideo)" />
+        <!-- Video Details Simulation (Mountains & Stars) -->
+        <path d="M 0 750 Q 400 500, 900 680 T 1760 620 L 1760 990 L 0 990 Z" fill="#09101A" opacity="0.8"/>
+        <path d="M 0 820 Q 600 640, 1200 800 T 1760 760 L 1760 990 L 0 990 Z" fill="#060A10" opacity="0.95"/>
+        <circle cx="1450" cy="220" r="45" fill="#FFEAA7" opacity="0.75" />
+        <circle cx="1450" cy="220" r="60" fill="#FFEAA7" opacity="0.15" />
+
+        <!-- Sidebar Container (Width = 130 + 240 + 372 dp * scale) -->
+        <!-- In 1920 scale: Groups 240, Channels 440, Programs 680 -> Total = 1360px. Scaled = ~1246px -->
+        <g id="GuideSidebar" transform="translate(0, 0)">
+            <!-- Glassmorphism Opaque Gradient Background -->
+            <rect x="0" y="0" width="1240" height="990" fill="url(#sidebarOpaqueBg)" />
+            <line x1="1240" y1="0" x2="1240" y2="990" stroke="#00E5FF" stroke-opacity="0.15" stroke-width="1.5" />
+
+            <!-- COLUMN 1: Groups (Left: x=0, width=220) -->
+            <g id="Col_Groups" transform="translate(24, 32)">
+                <text x="12" y="24" fill="#64748B" font-size="13" font-weight="700" letter-spacing="1.5">频道分组 GROUPS</text>
+
+                <!-- Group Item: Favorites -->
+                <g transform="translate(0, 48)">
+                    <rect width="190" height="48" rx="24" fill="#141B26" />
+                    <text x="20" y="30" fill="#E2E8F0" font-size="15" font-weight="600">⭐ 我的收藏</text>
+                    <rect x="145" y="14" width="30" height="20" rx="10" fill="#1E293B" />
+                    <text x="160" y="28" fill="#94A3B8" font-size="11" text-anchor="middle">8</text>
+                </g>
+
+                <!-- Group Item: CCTV (Selected Group) -->
+                <g transform="translate(0, 106)">
+                    <rect width="190" height="48" rx="24" fill="url(#focusCardGradient)" stroke="#00E5FF" stroke-width="1.5" />
+                    <text x="20" y="30" fill="#00E5FF" font-size="15" font-weight="700">📺 央视频道</text>
+                    <rect x="145" y="14" width="30" height="20" rx="10" fill="#00E5FF" fill-opacity="0.2" />
+                    <text x="160" y="28" fill="#00E5FF" font-size="11" font-weight="600" text-anchor="middle">18</text>
+                </g>
+
+                <!-- Group Item: Satellite -->
+                <g transform="translate(0, 164)">
+                    <rect width="190" height="48" rx="24" fill="transparent" />
+                    <text x="20" y="30" fill="#94A3B8" font-size="15" font-weight="500">📡 卫视精选</text>
+                    <text x="160" y="30" fill="#475569" font-size="12" text-anchor="middle">32</text>
+                </g>
+
+                <!-- Group Item: Local -->
+                <g transform="translate(0, 222)">
+                    <rect width="190" height="48" rx="24" fill="transparent" />
+                    <text x="20" y="30" fill="#94A3B8" font-size="15" font-weight="500">🏙️ 地方频道</text>
+                    <text x="160" y="30" fill="#475569" font-size="12" text-anchor="middle">45</text>
+                </g>
+
+                <!-- Group Item: 4K UHD -->
+                <g transform="translate(0, 280)">
+                    <rect width="190" height="48" rx="24" fill="transparent" />
+                    <text x="20" y="30" fill="#94A3B8" font-size="15" font-weight="500">✨ 4K 超高清</text>
+                    <text x="160" y="30" fill="#475569" font-size="12" text-anchor="middle">6</text>
+                </g>
+            </g>
+
+            <!-- Column Divider 1 -->
+            <line x1="240" y1="24" x2="240" y2="960" stroke="#1E293B" stroke-width="1" stroke-dasharray="4 4"/>
+
+            <!-- COLUMN 2: Channels (Middle: x=256, width=400) -->
+            <g id="Col_Channels" transform="translate(256, 32)">
+                <text x="12" y="24" fill="#64748B" font-size="13" font-weight="700" letter-spacing="1.5">央视频道 (18)</text>
+
+                <!-- Channel 1: CCTV-1 -->
+                <g transform="translate(0, 48)">
+                    <rect width="380" height="68" rx="14" fill="#141B26" stroke="#1E293B" stroke-width="1" />
+                    <text x="20" y="40" fill="#64748B" font-size="16" font-weight="700" class="mono">01</text>
+                    <!-- Logo Capsule -->
+                    <rect x="54" y="14" width="46" height="40" rx="8" fill="#1E293B" />
+                    <text x="77" y="39" fill="#E2E8F0" font-size="11" font-weight="800" text-anchor="middle">CCTV1</text>
+                    <text x="112" y="33" fill="#FFFFFF" font-size="15" font-weight="600">CCTV-1 综合 4K</text>
+                    <text x="112" y="52" fill="#64748B" font-size="12">今日说法</text>
+                    <!-- 4K Badge -->
+                    <rect x="330" y="24" width="32" height="20" rx="4" fill="#00E5FF" fill-opacity="0.15" />
+                    <text x="346" y="38" fill="#00E5FF" font-size="9" font-weight="800" text-anchor="middle">4K</text>
+                </g>
+
+                <!-- Channel 2: CCTV-5 (FOCUSED & PLAYING) -->
+                <g transform="translate(0, 126)" filter="url(#focusShadow)">
+                    <rect width="380" height="74" rx="16" fill="#172338" stroke="#00E5FF" stroke-width="2.5" />
+                    <text x="20" y="44" fill="#00E5FF" font-size="18" font-weight="800" class="mono">05</text>
+                    <!-- Logo Capsule with Neon Glow -->
+                    <rect x="54" y="16" width="50" height="42" rx="10" fill="#00E5FF" fill-opacity="0.2" stroke="#00E5FF" stroke-width="1" />
+                    <text x="79" y="42" fill="#00E5FF" font-size="12" font-weight="800" text-anchor="middle">CCTV5</text>
+                    <text x="116" y="35" fill="#FFFFFF" font-size="16" font-weight="700">CCTV-5 体育 4K</text>
+                    <!-- Playing Indicator Waves -->
+                    <g transform="translate(116, 44)">
+                        <rect x="0" y="4" width="3" height="8" rx="1.5" fill="#00E676" />
+                        <rect x="5" y="1" width="3" height="11" rx="1.5" fill="#00E676" />
+                        <rect x="10" y="3" width="3" height="9" rx="1.5" fill="#00E676" />
+                        <text x="20" y="11" fill="#00E676" font-size="12" font-weight="600">LIVE · 世界杯预选赛: 中国 vs 韩国</text>
+                    </g>
+                    <!-- Remote OK Focus Pointer -->
+                    <polygon points="364,37 354,31 354,43" fill="#00E5FF" />
+                </g>
+
+                <!-- Channel 3: CCTV-13 -->
+                <g transform="translate(0, 210)">
+                    <rect width="380" height="68" rx="14" fill="#141B26" stroke="#1E293B" stroke-width="1" />
+                    <text x="20" y="40" fill="#64748B" font-size="16" font-weight="700" class="mono">13</text>
+                    <rect x="54" y="14" width="46" height="40" rx="8" fill="#1E293B" />
+                    <text x="77" y="39" fill="#E2E8F0" font-size="11" font-weight="800" text-anchor="middle">NEWS</text>
+                    <text x="112" y="33" fill="#FFFFFF" font-size="15" font-weight="600">CCTV-13 新闻</text>
+                    <text x="112" y="52" fill="#64748B" font-size="12">共同关注 (正在直播)</text>
+                </g>
+
+                <!-- Channel 4: CCTV-6 -->
+                <g transform="translate(0, 288)">
+                    <rect width="380" height="68" rx="14" fill="#141B26" stroke="#1E293B" stroke-width="1" />
+                    <text x="20" y="40" fill="#64748B" font-size="16" font-weight="700" class="mono">06</text>
+                    <rect x="54" y="14" width="46" height="40" rx="8" fill="#1E293B" />
+                    <text x="77" y="39" fill="#E2E8F0" font-size="11" font-weight="800" text-anchor="middle">CCTV6</text>
+                    <text x="112" y="33" fill="#FFFFFF" font-size="15" font-weight="600">CCTV-6 电影 HD</text>
+                    <text x="112" y="52" fill="#64748B" font-size="12">动作大片: 流浪地球 2</text>
+                </g>
+
+                <!-- Channel 5: CCTV-8 -->
+                <g transform="translate(0, 366)">
+                    <rect width="380" height="68" rx="14" fill="#141B26" stroke="#1E293B" stroke-width="1" />
+                    <text x="20" y="40" fill="#64748B" font-size="16" font-weight="700" class="mono">08</text>
+                    <rect x="54" y="14" width="46" height="40" rx="8" fill="#1E293B" />
+                    <text x="77" y="39" fill="#E2E8F0" font-size="11" font-weight="800" text-anchor="middle">CCTV8</text>
+                    <text x="112" y="33" fill="#FFFFFF" font-size="15" font-weight="600">CCTV-8 电视剧 HD</text>
+                    <text x="112" y="52" fill="#64748B" font-size="12">繁花 (第 14 集)</text>
+                </g>
+            </g>
+
+            <!-- Column Divider 2 -->
+            <line x1="660" y1="24" x2="660" y2="960" stroke="#1E293B" stroke-width="1" stroke-dasharray="4 4"/>
+
+            <!-- COLUMN 3: EPG Timeline & Catchup (Right: x=684, width=540) -->
+            <g id="Col_EPG" transform="translate(684, 32)">
+                <!-- Date Bar Tabs -->
+                <g transform="translate(0, 0)">
+                    <rect width="520" height="42" rx="21" fill="#111827" stroke="#1E293B" stroke-width="1" />
+                    <text x="60" y="26" fill="#64748B" font-size="13" font-weight="500" text-anchor="middle">昨日 11-07</text>
+                    
+                    <!-- Today Tab (Selected) -->
+                    <rect x="140" y="4" width="240" height="34" rx="17" fill="#00E5FF" fill-opacity="0.15" stroke="#00E5FF" stroke-width="1" />
+                    <circle cx="165" cy="21" r="4" fill="#00E676" />
+                    <text x="260" y="26" fill="#00E5FF" font-size="13" font-weight="700" text-anchor="middle">今日 11-08 · 7 天回看</text>
+                    
+                    <text x="440" y="26" fill="#64748B" font-size="13" font-weight="500" text-anchor="middle">明日 11-09</text>
+                </g>
+
+                <!-- EPG Program 1 (Past, Catchup available) -->
+                <g transform="translate(0, 58)">
+                    <rect width="520" height="60" rx="12" fill="#131B26" />
+                    <text x="20" y="36" fill="#94A3B8" font-size="14" font-weight="600" class="mono">17:00</text>
+                    <text x="80" y="36" fill="#E2E8F0" font-size="14" font-weight="500">实况录像: 欧冠联赛小组赛精选</text>
+                    <!-- Catchup Badge -->
+                    <rect x="430" y="18" width="70" height="24" rx="6" fill="#FF7A00" fill-opacity="0.15" stroke="#FF7A00" stroke-width="1" />
+                    <text x="465" y="34" fill="#FF7A00" font-size="11" font-weight="700" text-anchor="middle">回看 ↺</text>
+                </g>
+
+                <!-- EPG Program 2 (Past, Catchup available) -->
+                <g transform="translate(0, 126)">
+                    <rect width="520" height="60" rx="12" fill="#131B26" />
+                    <text x="20" y="36" fill="#94A3B8" font-size="14" font-weight="600" class="mono">18:30</text>
+                    <text x="80" y="36" fill="#E2E8F0" font-size="14" font-weight="500">体育新闻与前瞻热身</text>
+                    <rect x="430" y="18" width="70" height="24" rx="6" fill="#FF7A00" fill-opacity="0.15" stroke="#FF7A00" stroke-width="1" />
+                    <text x="465" y="34" fill="#FF7A00" font-size="11" font-weight="700" text-anchor="middle">回看 ↺</text>
+                </g>
+
+                <!-- EPG Program 3 (CURRENT LIVE & FOCUS) -->
+                <g transform="translate(0, 194)" filter="url(#focusShadow)">
+                    <rect width="520" height="96" rx="16" fill="#18253B" stroke="#00E5FF" stroke-width="2" />
+                    <!-- Time & LIVE Pill -->
+                    <text x="20" y="36" fill="#00E5FF" font-size="15" font-weight="800" class="mono">19:35</text>
+                    <rect x="80" y="18" width="60" height="24" rx="6" fill="#00E676" fill-opacity="0.2" stroke="#00E676" stroke-width="1" />
+                    <circle cx="92" cy="30" r="3" fill="#00E676" />
+                    <text x="116" y="34" fill="#00E676" font-size="11" font-weight="800" text-anchor="middle">LIVE</text>
+                    <text x="152" y="35" fill="#FFFFFF" font-size="15" font-weight="700">2026 世界杯预选赛: 中国 vs 韩国</text>
+
+                    <!-- Progress Bar Component -->
+                    <g transform="translate(20, 56)">
+                        <rect width="480" height="8" rx="4" fill="#0B1320" />
+                        <rect width="320" height="8" rx="4" fill="url(#progressGrad)" />
+                        <circle cx="320" cy="4" r="6" fill="#00E5FF" filter="url(#cyanGlow)" />
+                        <text x="0" y="26" fill="#64748B" font-size="12" class="mono">19:35 开始 (已播 65 分钟)</text>
+                        <text x="480" y="26" fill="#64748B" font-size="12" class="mono" text-anchor="end">21:30 结束</text>
+                    </g>
+                </g>
+
+                <!-- EPG Program 4 (Future) -->
+                <g transform="translate(0, 300)">
+                    <rect width="520" height="60" rx="12" fill="#0E1520" opacity="0.7" />
+                    <text x="20" y="36" fill="#64748B" font-size="14" font-weight="600" class="mono">21:35</text>
+                    <text x="80" y="36" fill="#94A3B8" font-size="14" font-weight="500">顶级赛事回放: 乒乓球世界杯决赛</text>
+                    <text x="480" y="36" fill="#475569" font-size="12" text-anchor="end">即将播出</text>
+                </g>
+
+                <!-- EPG Program 5 (Future) -->
+                <g transform="translate(0, 368)">
+                    <rect width="520" height="60" rx="12" fill="#0E1520" opacity="0.5" />
+                    <text x="20" y="36" fill="#64748B" font-size="14" font-weight="600" class="mono">22:45</text>
+                    <text x="80" y="36" fill="#64748B" font-size="14" font-weight="500">体坛快讯晚间版</text>
+                </g>
+            </g>
+        </g>
+
+        <!-- Spec Annotation overlay lines for Screen 1 -->
+        <g id="SpecAnnotations_S1" stroke="#00E5FF" stroke-width="1" stroke-dasharray="2 2" opacity="0.8">
+            <!-- Col 1 Width (130dp) -->
+            <line x1="24" y1="966" x2="236" y2="966" />
+            <text x="130" y="982" fill="#00E5FF" font-size="11" font-weight="700" text-anchor="middle">w: 130dp (分组栏)</text>
+            <!-- Col 2 Width (240dp) -->
+            <line x1="256" y1="966" x2="656" y2="966" />
+            <text x="456" y="982" fill="#00E5FF" font-size="11" font-weight="700" text-anchor="middle">w: 240dp (频道栏)</text>
+            <!-- Col 3 Width (372dp) -->
+            <line x1="684" y1="966" x2="1204" y2="966" />
+            <text x="944" y="982" fill="#00E5FF" font-size="11" font-weight="700" text-anchor="middle">w: 372dp (EPG 栏)</text>
+        </g>
+    </g>
+    """)
+
+    # -------------------------------------------------------------
+    # SCREEN 2: Playback Info & TimeShift Catchup HUD (Top-Right)
+    # Origin: (1980, 110), Viewport: 1760x990
+    # -------------------------------------------------------------
+    svg.append("""
+    <g id="Screen2_TimeShiftHUD" transform="translate(1980, 110)">
+        <rect width="1760" height="990" rx="16" fill="#000000" stroke="#1E293B" stroke-width="2" filter="url(#cardShadow)"/>
+        
+        <g transform="translate(24, -28)">
+            <rect x="0" y="0" width="370" height="24" rx="6" fill="#1E293B" />
+            <text x="12" y="16" fill="#FF7A00" font-size="12" font-weight="700">SCREEN 02 · 极简时移与回看悬浮 HUD 浮层</text>
+            <text x="260" y="16" fill="#94A3B8" font-size="12">Playback &amp; TimeShift</text>
+        </g>
+
+        <!-- Simulated Stadium Live Football Broadcast -->
+        <rect x="0" y="0" width="1760" height="990" rx="16" fill="url(#stadiumGrass)" />
+        <ellipse cx="880" cy="550" rx="600" ry="250" fill="none" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="4" />
+        <line x1="880" y1="200" x2="880" y2="900" stroke="#FFFFFF" stroke-opacity="0.15" stroke-width="4" />
+        
+        <!-- Scoreboard Top-Left -->
+        <g transform="translate(60, 48)">
+            <rect width="280" height="48" rx="10" fill="#0B111A" fill-opacity="0.85" stroke="#1E293B" stroke-width="1" />
+            <text x="24" y="31" fill="#FFFFFF" font-size="15" font-weight="800">CHN</text>
+            <text x="75" y="31" fill="#FF5252" font-size="16" font-weight="900">1 - 0</text>
+            <text x="135" y="31" fill="#FFFFFF" font-size="15" font-weight="800">KOR</text>
+            <rect x="200" y="12" width="60" height="24" rx="6" fill="#1E293B" />
+            <text x="230" y="28" fill="#00E676" font-size="12" font-weight="700" text-anchor="middle" class="mono">65:14</text>
+        </g>
+
+        <!-- Top-Right Status Capsule -->
+        <g transform="translate(1360, 48)">
+            <rect width="340" height="48" rx="24" fill="#0B111A" fill-opacity="0.85" stroke="#1E293B" stroke-width="1" />
+            <text x="30" y="30" fill="#FFFFFF" font-size="15" font-weight="700" class="mono">20:48</text>
+            <circle cx="105" cy="24" r="4" fill="#00E676" />
+            <text x="116" y="29" fill="#94A3B8" font-size="13">Wi-Fi 5G</text>
+            <rect x="195" y="12" width="125" height="24" rx="12" fill="#00E5FF" fill-opacity="0.15" />
+            <text x="257" y="28" fill="#00E5FF" font-size="12" font-weight="700" text-anchor="middle" class="mono">18.5 MB/s</text>
+        </g>
+
+        <!-- FLOATING BOTTOM TIMESHIFT & PLAYBACK HUD -->
+        <!-- Placed at y = 730, height = 210, width = 1640 (Floating 50px above bottom) -->
+        <g id="TimeShiftFloatingHUD" transform="translate(60, 720)" filter="url(#focusShadow)">
+            <rect width="1640" height="216" rx="28" fill="url(#hudGlassGrad)" stroke="#1E293B" stroke-width="2" />
+            
+            <!-- LEFT SECTION: Channel Identity -->
+            <g transform="translate(36, 32)">
+                <rect width="64" height="64" rx="16" fill="#00E5FF" fill-opacity="0.15" stroke="#00E5FF" stroke-width="1.5" />
+                <text x="32" y="42" fill="#00E5FF" font-size="26" font-weight="900" text-anchor="middle" class="mono">05</text>
+                
+                <g transform="translate(80, 8)">
+                    <text x="0" y="22" fill="#FFFFFF" font-size="22" font-weight="800">CCTV-5 体育 4K</text>
+                    <g transform="translate(0, 32)">
+                        <!-- Media Badges -->
+                        <rect x="0" y="0" width="56" height="20" rx="4" fill="#1E293B" />
+                        <text x="28" y="14" fill="#00E5FF" font-size="10" font-weight="800" text-anchor="middle">4K HDR</text>
+                        <rect x="62" y="0" width="48" height="20" rx="4" fill="#1E293B" />
+                        <text x="86" y="14" fill="#E2E8F0" font-size="10" font-weight="700" text-anchor="middle">50 FPS</text>
+                        <rect x="116" y="0" width="54" height="20" rx="4" fill="#1E293B" />
+                        <text x="143" y="14" fill="#94A3B8" font-size="10" font-weight="600" text-anchor="middle">DOLBY</text>
+                        <rect x="176" y="0" width="52" height="20" rx="4" fill="#1E293B" />
+                        <text x="202" y="14" fill="#00E676" font-size="10" font-weight="700" text-anchor="middle">源 #1</text>
+                    </g>
+                </g>
+            </g>
+
+            <!-- MIDDLE SECTION: Programs & TimeShift Timeline (width = 900) -->
+            <g transform="translate(420, 26)">
+                <!-- Program Names Row -->
+                <text x="0" y="22" fill="#FFFFFF" font-size="17" font-weight="700">正在播放: 2026 世界杯预选赛 (中国 vs 韩国)</text>
+                <text x="900" y="22" fill="#64748B" font-size="14" font-weight="500" text-anchor="end">下一节目: 体育新闻 (21:35)</text>
+
+                <!-- High-Precision TimeShift Seekbar Track -->
+                <g transform="translate(0, 42)">
+                    <!-- Track Base -->
+                    <rect width="900" height="12" rx="6" fill="#0D131D" stroke="#1E293B" stroke-width="1" />
+                    <!-- Cached / Catchup Window -->
+                    <rect x="120" width="660" height="12" rx="6" fill="#1A283E" />
+                    <!-- Played Progress to Head -->
+                    <rect x="120" width="540" height="12" rx="6" fill="url(#cyanAccentGrad)" />
+                    
+                    <!-- Scrub Thumb / Playhead (Currently Time-shifted) -->
+                    <circle cx="660" cy="6" r="14" fill="#00E5FF" filter="url(#cyanGlow)" />
+                    <circle cx="660" cy="6" r="6" fill="#FFFFFF" />
+
+                    <!-- Floating Time Flag above thumb -->
+                    <g transform="translate(660, -28)">
+                        <rect x="-45" y="-12" width="90" height="24" rx="6" fill="#00E5FF" />
+                        <text x="0" y="4" fill="#09101A" font-size="12" font-weight="800" text-anchor="middle" class="mono">20:33:10</text>
+                    </g>
+
+                    <!-- Live Edge Point -->
+                    <circle cx="780" cy="6" r="5" fill="#FF5252" />
+                    <text x="780" y="32" fill="#FF5252" font-size="11" font-weight="800" text-anchor="middle">LIVE 现场</text>
+
+                    <!-- Time Labels Below -->
+                    <text x="0" y="32" fill="#64748B" font-size="12" class="mono">19:35:00</text>
+                    <g transform="translate(450, 32)">
+                        <!-- TimeShift Offset Indicator -->
+                        <rect x="-85" y="-16" width="170" height="22" rx="11" fill="#FF7A00" fill-opacity="0.2" stroke="#FF7A00" stroke-width="1" />
+                        <text x="0" y="-1" fill="#FF7A00" font-size="12" font-weight="800" text-anchor="middle" class="mono">⏱️ 慢于直播 -15:10</text>
+                    </g>
+                    <text x="900" y="32" fill="#64748B" font-size="12" class="mono" text-anchor="end">21:30:00</text>
+                </g>
+            </g>
+
+            <!-- RIGHT SECTION: Back to Live & Speed Actions -->
+            <g transform="translate(1380, 38)">
+                <!-- Back to Live Button (Highlighted Action Button) -->
+                <g filter="url(#cyanGlow)">
+                    <rect width="200" height="52" rx="26" fill="url(#orangeAccentGrad)" />
+                    <text x="100" y="32" fill="#FFFFFF" font-size="16" font-weight="800" text-anchor="middle">返回直播 ⇥</text>
+                </g>
+                <text x="100" y="74" fill="#64748B" font-size="12" font-weight="500" text-anchor="middle">遥控器按 [OK] 追平</text>
+                
+                <!-- Rewind / Fast-forward shortcuts hint -->
+                <g transform="translate(20, 94)">
+                    <rect width="160" height="28" rx="8" fill="#141B26" stroke="#1E293B" stroke-width="1" />
+                    <text x="80" y="19" fill="#94A3B8" font-size="11" font-weight="600" text-anchor="middle">◀ ◀ 10s   快进 10s ▶ ▶</text>
+                </g>
+            </g>
+        </g>
+    </g>
+    """)
+
+    # -------------------------------------------------------------
+    # SCREEN 3: TV Modern Settings Panel (Bottom-Left)
+    # Origin: (80, 1170), Viewport: 1760x990
+    # -------------------------------------------------------------
+    svg.append("""
+    <g id="Screen3_TVSettings" transform="translate(80, 1170)">
+        <rect width="1760" height="990" rx="16" fill="#000000" stroke="#1E293B" stroke-width="2" filter="url(#cardShadow)"/>
+        
+        <g transform="translate(24, -28)">
+            <rect x="0" y="0" width="360" height="24" rx="6" fill="#1E293B" />
+            <text x="12" y="16" fill="#00E5FF" font-size="12" font-weight="700">SCREEN 03 · 电视端现代沉浸式设置面板</text>
+            <text x="250" y="16" fill="#94A3B8" font-size="12">TV Settings Panel</text>
+        </g>
+
+        <!-- Left 1/3 Dimmed Video View -->
+        <g>
+            <rect width="560" height="990" rx="16" fill="url(#tvBgVideo)" />
+            <rect width="560" height="990" rx="16" fill="#000000" fill-opacity="0.65" />
+            <text x="280" y="500" fill="#64748B" font-size="16" font-weight="500" text-anchor="middle">电视直播画面在左侧透出</text>
+            <text x="280" y="530" fill="#475569" font-size="13" text-anchor="middle">按 [返回] 键关闭设置并全屏</text>
+        </g>
+
+        <!-- Right 2/3 Sleek Apple-TV Inspired Panel Container -->
+        <g transform="translate(560, 0)">
+            <!-- Glass Divider Edge -->
+            <rect x="0" y="0" width="3" height="990" fill="#00E5FF" filter="url(#panelEdgeGlow)" />
+            <rect x="3" y="0" width="1197" height="990" fill="#0D111A" />
+
+            <!-- Header -->
+            <g transform="translate(56, 48)">
+                <text x="0" y="32" fill="#FFFFFF" font-size="32" font-weight="800">系统设置 Settings</text>
+                <text x="0" y="60" fill="#64748B" font-size="14">遥控器方向键移动焦点 · OK 键确认修改 · 局域网 Web 实时同步</text>
+                
+                <!-- LAN Web URL Pill -->
+                <g transform="translate(740, 6)">
+                    <rect width="360" height="42" rx="21" fill="#141E2C" stroke="#00E5FF" stroke-width="1" />
+                    <circle cx="24" cy="21" r="5" fill="#00E676" />
+                    <text x="40" y="26" fill="#94A3B8" font-size="13">网页远程配置: </text>
+                    <text x="145" y="26" fill="#00E5FF" font-size="13" font-weight="700" class="mono">http://192.168.1.108:8080</text>
+                </g>
+            </g>
+
+            <!-- Scrollable Settings Group List -->
+            <g transform="translate(56, 136)">
+                <!-- SECTION 1: Play Source & Channel -->
+                <g transform="translate(0, 0)">
+                    <text x="0" y="20" fill="#00E5FF" font-size="15" font-weight="700" letter-spacing="1">播放源与频道管理 PLAYLIST</text>
+                    
+                    <!-- Row 1: M3U URL Input -->
+                    <g transform="translate(0, 36)">
+                        <rect width="1080" height="60" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                        <text x="24" y="35" fill="#FFFFFF" font-size="15" font-weight="600">M3U 播放列表地址</text>
+                        <text x="220" y="35" fill="#64748B" font-size="14" class="mono">https://live.example.com/tv/iptv.m3u8</text>
+                        <!-- Edit Button -->
+                        <rect x="960" y="12" width="96" height="36" rx="18" fill="#1E293B" />
+                        <text x="1008" y="35" fill="#94A3B8" font-size="13" font-weight="600" text-anchor="middle">编辑 URL</text>
+                    </g>
+
+                    <!-- Row 2: Merge Same Name Channels (FOCUSED STATE) -->
+                    <g transform="translate(0, 108)" filter="url(#focusShadow)">
+                        <rect width="1080" height="72" rx="16" fill="#162338" stroke="#00E5FF" stroke-width="2.5" />
+                        <text x="24" y="33" fill="#FFFFFF" font-size="16" font-weight="700">合并同名频道 (多线路自动聚合)</text>
+                        <text x="24" y="54" fill="#00E5FF" font-size="12">开启后同名频道聚合为一个条目，播放失败自动故障倒换 (Failover)，按 [R] 键切源</text>
+                        
+                        <!-- Modern Toggle Switch (ON) -->
+                        <g transform="translate(980, 18)">
+                            <rect width="68" height="36" rx="18" fill="#00E5FF" />
+                            <circle cx="50" cy="18" r="14" fill="#0B1019" filter="url(#cyanGlow)" />
+                        </g>
+                    </g>
+                </g>
+
+                <!-- SECTION 2: EPG Electronic Program Guide -->
+                <g transform="translate(0, 240)">
+                    <text x="0" y="20" fill="#00E5FF" font-size="15" font-weight="700" letter-spacing="1">电子节目单 EPG CONFIG</text>
+                    
+                    <!-- Segmented Control: EPG Preference -->
+                    <g transform="translate(0, 36)">
+                        <rect width="1080" height="64" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                        <text x="24" y="38" fill="#FFFFFF" font-size="15" font-weight="600">EPG 来源优先级</text>
+                        
+                        <!-- 3-Segment Pills -->
+                        <g transform="translate(560, 10)">
+                            <rect width="500" height="44" rx="12" fill="#0D131D" />
+                            <!-- Segment 1: Auto (Selected) -->
+                            <rect x="4" y="4" width="160" height="36" rx="10" fill="#00E5FF" fill-opacity="0.2" stroke="#00E5FF" stroke-width="1.5" />
+                            <text x="84" y="26" fill="#00E5FF" font-size="13" font-weight="700" text-anchor="middle">自动优先 (推荐)</text>
+                            
+                            <text x="250" y="26" fill="#94A3B8" font-size="13" font-weight="500" text-anchor="middle">M3U 内置优先</text>
+                            <text x="415" y="26" fill="#94A3B8" font-size="13" font-weight="500" text-anchor="middle">仅自定义 EPG</text>
+                        </g>
+                    </g>
+                </g>
+
+                <!-- SECTION 3: Playback Engine & Display -->
+                <g transform="translate(0, 370)">
+                    <text x="0" y="20" fill="#00E5FF" font-size="15" font-weight="700" letter-spacing="1">播放核心与解码 ENGINE &amp; DECODER</text>
+                    
+                    <!-- Row 1: Render Mode -->
+                    <g transform="translate(0, 36)">
+                        <rect width="1080" height="60" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                        <text x="24" y="35" fill="#FFFFFF" font-size="15" font-weight="600">画面输出渲染方式</text>
+                        <text x="220" y="35" fill="#64748B" font-size="13">修改后需重启应用</text>
+                        <g transform="translate(740, 10)">
+                            <rect width="320" height="40" rx="10" fill="#0D131D" />
+                            <rect x="4" y="4" width="154" height="32" rx="8" fill="#1E293B" stroke="#00E5FF" stroke-width="1" />
+                            <text x="81" y="24" fill="#00E5FF" font-size="13" font-weight="700" text-anchor="middle">SurfaceView (推荐)</text>
+                            <text x="240" y="24" fill="#64748B" font-size="13" text-anchor="middle">TextureView</text>
+                        </g>
+                    </g>
+
+                    <!-- Row 2: Decode Mode -->
+                    <g transform="translate(0, 108)">
+                        <rect width="1080" height="60" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                        <text x="24" y="35" fill="#FFFFFF" font-size="15" font-weight="600">视频解码策略</text>
+                        <g transform="translate(680, 10)">
+                            <rect width="380" height="40" rx="10" fill="#0D131D" />
+                            <rect x="4" y="4" width="124" height="32" rx="8" fill="#1E293B" stroke="#00E5FF" stroke-width="1" />
+                            <text x="66" y="24" fill="#00E5FF" font-size="12" font-weight="700" text-anchor="middle">自动 (优先硬解)</text>
+                            <text x="190" y="24" fill="#64748B" font-size="12" text-anchor="middle">仅硬件解码</text>
+                            <text x="315" y="24" fill="#64748B" font-size="12" text-anchor="middle">优先软件解码</text>
+                        </g>
+                    </g>
+
+                    <!-- Row 3: Tunneling Switch -->
+                    <g transform="translate(0, 180)">
+                        <rect width="1080" height="60" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                        <text x="24" y="35" fill="#FFFFFF" font-size="15" font-weight="600">视频直通模式 (Tunneling Audio/Video)</text>
+                        <text x="360" y="35" fill="#64748B" font-size="13">实验性特性，针对高端 Android TV 芯片降低丢帧</text>
+                        <g transform="translate(980, 12)">
+                            <rect width="68" height="36" rx="18" fill="#1E293B" />
+                            <circle cx="18" cy="18" r="14" fill="#64748B" />
+                        </g>
+                    </g>
+                </g>
+
+                <!-- SECTION 4: Update & Version -->
+                <g transform="translate(0, 640)">
+                    <rect width="1080" height="72" rx="16" fill="#111827" stroke="#1F2937" stroke-width="1" />
+                    <text x="24" y="34" fill="#FFFFFF" font-size="16" font-weight="700">LiteTV v1.5.3 (Build 1530)</text>
+                    <text x="24" y="55" fill="#00E676" font-size="13">✓ 已是最新正式版 · 签名校验 SHA256 正常</text>
+                    <g transform="translate(880, 14)">
+                        <rect width="170" height="44" rx="22" fill="#1E293B" stroke="#00E5FF" stroke-width="1.5" />
+                        <text x="85" y="27" fill="#00E5FF" font-size="14" font-weight="700" text-anchor="middle">检查新版本 ↺</text>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+    """)
+
+    # -------------------------------------------------------------
+    # SCREEN 4: Modern Responsive Web Configuration Console (Bottom-Right)
+    # Origin: (1980, 1170), Viewport: 1760x990
+    # -------------------------------------------------------------
+    svg.append("""
+    <g id="Screen4_WebConsole" transform="translate(1980, 1170)">
+        <rect width="1760" height="990" rx="16" fill="#000000" stroke="#1E293B" stroke-width="2" filter="url(#cardShadow)"/>
+        
+        <g transform="translate(24, -28)">
+            <rect x="0" y="0" width="370" height="24" rx="6" fill="#1E293B" />
+            <text x="12" y="16" fill="#00E5FF" font-size="12" font-weight="700">SCREEN 04 · 全新现代响应式 Web 配置控制台</text>
+            <text x="260" y="16" fill="#94A3B8" font-size="12">Modern Web Dashboard</text>
+        </g>
+
+        <!-- Deep Dark Mesh Background -->
+        <rect width="1760" height="990" rx="16" fill="#0A0E17" />
+        
+        <!-- SUB-VIEW 1: Desktop Browser Mockup (Left 1180px) -->
+        <g id="WebDesktopView" transform="translate(40, 36)">
+            <!-- Browser Chrome -->
+            <rect width="1180" height="918" rx="16" fill="#0E1420" stroke="#1E293B" stroke-width="1.5" filter="url(#cardShadow)"/>
+            
+            <!-- Window Titlebar -->
+            <g transform="translate(0, 0)">
+                <path d="M 0 16 Q 0 0 16 0 L 1164 0 Q 1180 0 1180 16 L 1180 44 L 0 44 Z" fill="#141B28" />
+                <circle cx="24" cy="22" r="6" fill="#FF5F56" />
+                <circle cx="44" cy="22" r="6" fill="#FFBD2E" />
+                <circle cx="64" cy="22" r="6" fill="#27C93F" />
+                
+                <!-- URL Address Bar -->
+                <rect x="180" y="8" width="820" height="28" rx="8" fill="#090E16" stroke="#1E293B" stroke-width="1" />
+                <text x="200" y="26" fill="#00E5FF" font-size="11" font-weight="600" class="mono">🔒 http://192.168.1.108:8080/config</text>
+            </g>
+
+            <!-- Dashboard Content Container -->
+            <g transform="translate(36, 68)">
+                <!-- Header -->
+                <g>
+                    <text x="0" y="28" fill="#FFFFFF" font-size="24" font-weight="800">📺 LiteTV 局域网控制台</text>
+                    <text x="280" y="28" fill="#64748B" font-size="14">已连接电视: 小米电视4 · 局域网内所有修改即时生效</text>
+                    
+                    <g transform="translate(930, 4)">
+                        <rect width="170" height="34" rx="17" fill="#00E676" fill-opacity="0.15" stroke="#00E676" stroke-width="1" />
+                        <circle cx="20" cy="17" r="4" fill="#00E676" />
+                        <text x="95" y="22" fill="#00E676" font-size="13" font-weight="700" text-anchor="middle">设备在线 · 直播中</text>
+                    </g>
+                </g>
+
+                <!-- Grid of Cards (2 Columns) -->
+                <!-- CARD 1: M3U Management -->
+                <g transform="translate(0, 52)">
+                    <rect width="536" height="360" rx="16" fill="url(#webCardGrad)" stroke="#1E293B" stroke-width="1" />
+                    <text x="24" y="36" fill="#00E5FF" font-size="16" font-weight="700">M3U 播放列表管理</text>
+                    
+                    <!-- URL Input Box -->
+                    <text x="24" y="70" fill="#94A3B8" font-size="13">订阅 URL 地址</text>
+                    <rect x="24" y="80" width="488" height="42" rx="10" fill="#0B1019" stroke="#1E293B" stroke-width="1" />
+                    <text x="36" y="106" fill="#FFFFFF" font-size="13" class="mono">http://mytv.local/channels.m3u8</text>
+                    
+                    <!-- Drag & Drop Upload Zone -->
+                    <g transform="translate(24, 138)">
+                        <rect width="488" height="110" rx="12" fill="#0A0E16" stroke="#00E5FF" stroke-width="1.5" stroke-dasharray="6 6" fill-opacity="0.5" />
+                        <!-- Cloud Icon -->
+                        <path d="M 244 175 C 238 175, 230 170, 230 162 C 230 155, 236 150, 242 150 C 246 142, 256 140, 264 145 C 272 144, 278 150, 278 158 C 283 159, 286 164, 285 170 C 284 175, 278 175, 275 175 Z" fill="#00E5FF" fill-opacity="0.3" stroke="#00E5FF" stroke-width="1.5" />
+                        <text x="244" y="196" fill="#E2E8F0" font-size="13" font-weight="600" text-anchor="middle">拖拽 M3U / TXT 文件到此处，或点击浏览上传</text>
+                        <text x="244" y="218" fill="#64748B" font-size="11" text-anchor="middle">自动上传至电视并立即重新解析加载</text>
+                    </g>
+
+                    <!-- Merge same name toggle -->
+                    <g transform="translate(24, 268)">
+                        <rect width="488" height="44" rx="10" fill="#131B28" />
+                        <text x="16" y="27" fill="#E2E8F0" font-size="13" font-weight="600">合并同名频道 (多源聚合)</text>
+                        <!-- Switch ON -->
+                        <rect x="420" y="8" width="52" height="28" rx="14" fill="#00E5FF" />
+                        <circle cx="458" cy="22" r="11" fill="#090E16" />
+                    </g>
+
+                    <!-- Save Action Button -->
+                    <g transform="translate(24, 320)">
+                        <rect width="140" height="32" rx="8" fill="#00E5FF" />
+                        <text x="70" y="21" fill="#090E16" font-size="13" font-weight="700" text-anchor="middle">保存配置 ✓</text>
+                    </g>
+                </g>
+
+                <!-- CARD 2: EPG Configuration -->
+                <g transform="translate(564, 52)">
+                    <rect width="536" height="360" rx="16" fill="url(#webCardGrad)" stroke="#1E293B" stroke-width="1" />
+                    <text x="24" y="36" fill="#00E5FF" font-size="16" font-weight="700">EPG 节目单与回看规则</text>
+
+                    <text x="24" y="70" fill="#94A3B8" font-size="13">EPG 接口地址模版 (支持 {name} / {date})</text>
+                    <rect x="24" y="80" width="488" height="42" rx="10" fill="#0B1019" stroke="#1E293B" stroke-width="1" />
+                    <text x="36" y="106" fill="#FFFFFF" font-size="13" class="mono">http://epg.51zmt.top:8000/api/diyp/</text>
+
+                    <!-- Priority Selector -->
+                    <text x="24" y="148" fill="#94A3B8" font-size="13">来源仲裁优先级</text>
+                    <g transform="translate(24, 158)">
+                        <rect width="488" height="44" rx="10" fill="#0B1019" stroke="#1E293B" stroke-width="1" />
+                        <text x="16" y="27" fill="#00E5FF" font-size="13" font-weight="700">自动：优先使用自定义，回退使用 M3U 内置</text>
+                        <text x="460" y="27" fill="#64748B" font-size="12">▼</text>
+                    </g>
+
+                    <!-- EPG Status Card -->
+                    <g transform="translate(24, 222)">
+                        <rect width="488" height="88" rx="10" fill="#131B28" />
+                        <circle cx="24" cy="28" r="4" fill="#00E676" />
+                        <text x="38" y="32" fill="#E2E8F0" font-size="13" font-weight="600">当前 EPG 缓存状态良好 (V4 滚动窗口)</text>
+                        <text x="38" y="52" fill="#64748B" font-size="12">已抓取 182 个频道 · 保留过去 7 天回看清单 · 今日命中率 98.4%</text>
+                        <text x="38" y="72" fill="#00E5FF" font-size="12" font-weight="600">M3U 声明 EPG: http://epg.112114.xyz/pp.xml.gz</text>
+                    </g>
+
+                    <g transform="translate(24, 320)">
+                        <rect width="140" height="32" rx="8" fill="#00E5FF" />
+                        <text x="70" y="21" fill="#090E16" font-size="13" font-weight="700" text-anchor="middle">保存 EPG 设置</text>
+                    </g>
+                </g>
+
+                <!-- CARD 3: Video Engine & System Info (Bottom Half) -->
+                <g transform="translate(0, 432)">
+                    <rect width="1100" height="380" rx="16" fill="url(#webCardGrad)" stroke="#1E293B" stroke-width="1" />
+                    <text x="24" y="36" fill="#00E5FF" font-size="16" font-weight="700">播放与系统参数配置</text>
+
+                    <!-- Columns for options -->
+                    <g transform="translate(24, 60)">
+                        <!-- Video output -->
+                        <text x="0" y="16" fill="#94A3B8" font-size="13">画面渲染输出</text>
+                        <rect x="0" y="26" width="320" height="42" rx="10" fill="#0B1019" stroke="#1E293B" stroke-width="1" />
+                        <text x="16" y="52" fill="#FFFFFF" font-size="13">SurfaceView (推荐硬件层)</text>
+
+                        <!-- Video decode -->
+                        <text x="360" y="16" fill="#94A3B8" font-size="13">解码模式</text>
+                        <rect x="360" y="26" width="320" height="42" rx="10" fill="#0B1019" stroke="#1E293B" stroke-width="1" />
+                        <text x="376" y="52" fill="#FFFFFF" font-size="13">自动 (硬件优先，回退软解)</text>
+
+                        <!-- Sidebar Opacity -->
+                        <text x="720" y="16" fill="#94A3B8" font-size="13">电视端侧边栏底色</text>
+                        <rect x="720" y="26" width="320" height="42" rx="10" fill="#0B1019" stroke="#1E293B" stroke-width="1" />
+                        <text x="736" y="52" fill="#FFFFFF" font-size="13">不透明 / 90% 深曜石黑</text>
+                    </g>
+
+                    <!-- Update & OTA Push -->
+                    <g transform="translate(24, 160)">
+                        <rect width="1052" height="180" rx="12" fill="#121824" stroke="#1E293B" stroke-width="1" />
+                        <text x="24" y="34" fill="#FFFFFF" font-size="16" font-weight="700">LiteTV 在线自更新 OTA</text>
+                        <text x="24" y="58" fill="#64748B" font-size="13">电视端版本: v1.5.3 (arm64-v8a) · 最新 Release: v1.5.3</text>
+                        
+                        <!-- Changelog preview -->
+                        <g transform="translate(24, 76)">
+                            <rect width="760" height="84" rx="8" fill="#0B1019" />
+                            <text x="16" y="24" fill="#E2E8F0" font-size="12" font-weight="600">更新日志：</text>
+                            <text x="16" y="46" fill="#94A3B8" font-size="12">1. 全新现代深色磨砂 UI 升级，重构电视端交互三栏</text>
+                            <text x="16" y="66" fill="#94A3B8" font-size="12">2. 同名频道智能聚合与故障自动倒换支持</text>
+                        </g>
+
+                        <!-- Push update button -->
+                        <g transform="translate(820, 94)">
+                            <rect width="200" height="46" rx="23" fill="#1E293B" stroke="#00E5FF" stroke-width="1.5" />
+                            <text x="100" y="28" fill="#00E5FF" font-size="14" font-weight="700" text-anchor="middle">向电视推送更新 🚀</text>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+
+        <!-- SUB-VIEW 2: Mobile Responsive View (Right 460px) -->
+        <g id="WebMobileView" transform="translate(1260, 36)">
+            <!-- Smartphone Shell Frame -->
+            <rect width="440" height="918" rx="42" fill="#0E1420" stroke="#1E293B" stroke-width="4" filter="url(#cardShadow)"/>
+            
+            <!-- Mobile Dynamic Island / Notch -->
+            <rect x="160" y="14" width="120" height="24" rx="12" fill="#000000" />
+            
+            <!-- Mobile Web Content -->
+            <g transform="translate(24, 52)">
+                <text x="12" y="28" fill="#FFFFFF" font-size="20" font-weight="800">📺 LiteTV 手机配置</text>
+                <text x="12" y="50" fill="#64748B" font-size="12">已连接: 192.168.1.108</text>
+
+                <!-- Mobile Card 1: Playlist -->
+                <g transform="translate(0, 68)">
+                    <rect width="392" height="210" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                    <text x="16" y="28" fill="#00E5FF" font-size="14" font-weight="700">M3U 订阅与上传</text>
+                    <rect x="16" y="40" width="360" height="38" rx="8" fill="#0B1019" />
+                    <text x="26" y="64" fill="#FFFFFF" font-size="12" class="mono">http://mytv.local/channels.m3u8</text>
+                    
+                    <!-- Mobile Upload Button -->
+                    <rect x="16" y="90" width="360" height="44" rx="10" fill="#1E293B" stroke="#00E5FF" stroke-width="1" stroke-dasharray="4 4" />
+                    <text x="196" y="117" fill="#00E5FF" font-size="13" font-weight="600" text-anchor="middle">📁 从手机相册/文件选择 M3U</text>
+                    
+                    <rect x="16" y="148" width="360" height="44" rx="22" fill="#00E5FF" />
+                    <text x="196" y="175" fill="#090E16" font-size="14" font-weight="700" text-anchor="middle">一键上传至电视</text>
+                </g>
+
+                <!-- Mobile Card 2: EPG -->
+                <g transform="translate(0, 294)">
+                    <rect width="392" height="160" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                    <text x="16" y="28" fill="#00E5FF" font-size="14" font-weight="700">EPG 节目单设置</text>
+                    <rect x="16" y="42" width="360" height="38" rx="8" fill="#0B1019" />
+                    <text x="26" y="66" fill="#94A3B8" font-size="12" class="mono">http://epg.51zmt.top:8000</text>
+                    <rect x="16" y="94" width="360" height="44" rx="22" fill="#1E293B" />
+                    <text x="196" y="121" fill="#E2E8F0" font-size="14" font-weight="600" text-anchor="middle">保存 EPG 地址</text>
+                </g>
+
+                <!-- Mobile Card 3: Quick Remote Actions -->
+                <g transform="translate(0, 470)">
+                    <rect width="392" height="240" rx="14" fill="#141C28" stroke="#1E293B" stroke-width="1" />
+                    <text x="16" y="28" fill="#00E5FF" font-size="14" font-weight="700">快捷控制与更新</text>
+                    <text x="16" y="52" fill="#64748B" font-size="12">手机端可直接触发电视重启播放与换台</text>
+                    
+                    <g transform="translate(16, 68)">
+                        <rect width="170" height="44" rx="10" fill="#1E293B" />
+                        <text x="85" y="27" fill="#E2E8F0" font-size="13" font-weight="600" text-anchor="middle">重载播放列表 ↻</text>
+                        
+                        <rect x="190" y="0" width="170" height="44" rx="10" fill="#1E293B" />
+                        <text x="275" y="27" fill="#E2E8F0" font-size="13" font-weight="600" text-anchor="middle">刷新 EPG 缓存 ↻</text>
+                    </g>
+
+                    <rect x="16" y="140" width="360" height="52" rx="26" fill="url(#orangeAccentGrad)" />
+                    <text x="196" y="172" fill="#FFFFFF" font-size="15" font-weight="800" text-anchor="middle">向电视推送更新安装包 📲</text>
+                </g>
+            </g>
+        </g>
+    </g>
+    """)
+
+    # Footer Design Tokens & Reference Scale Bar
+    svg.append(f"""
+    <g id="DesignTokensBar" transform="translate(80, {SVG_HEIGHT - 60})">
+        <rect width="3680" height="48" rx="12" fill="#0B1019" stroke="#1E293B" stroke-width="1"/>
+        <text x="32" y="30" fill="#94A3B8" font-size="14" font-weight="700">DESIGN TOKENS 规范速查：</text>
+        
+        <!-- Color Swatches -->
+        <g transform="translate(260, 14)">
+            <rect width="20" height="20" rx="4" fill="#0D111A" stroke="#1E293B" />
+            <text x="28" y="15" fill="#E2E8F0" font-size="12" class="mono">BG #0D111A</text>
+            
+            <rect x="140" width="20" height="20" rx="4" fill="#141B26" stroke="#1E293B" />
+            <text x="168" y="15" fill="#E2E8F0" font-size="12" class="mono">CARD #141B26</text>
+            
+            <rect x="290" width="20" height="20" rx="4" fill="#00E5FF" />
+            <text x="318" y="15" fill="#00E5FF" font-size="12" font-weight="700" class="mono">PRIMARY #00E5FF</text>
+            
+            <rect x="460" width="20" height="20" rx="4" fill="#FF7A00" />
+            <text x="488" y="15" fill="#FF7A00" font-size="12" font-weight="700" class="mono">TIMESHIFT #FF7A00</text>
+            
+            <rect x="650" width="20" height="20" rx="4" fill="#00E676" />
+            <text x="678" y="15" fill="#00E676" font-size="12" font-weight="700" class="mono">LIVE #00E676</text>
+            
+            <rect x="800" width="20" height="20" rx="4" fill="#FFFFFF" />
+            <text x="828" y="15" fill="#FFFFFF" font-size="12" class="mono">TEXT #FFFFFF</text>
+            
+            <rect x="940" width="20" height="20" rx="4" fill="#64748B" />
+            <text x="968" y="15" fill="#64748B" font-size="12" class="mono">MUTED #64748B</text>
+        </g>
+
+        <!-- Typography & Radii -->
+        <text x="2400" y="30" fill="#94A3B8" font-size="13">圆角规范: 大卡片 <tspan fill="#00E5FF" font-weight="700">16dp</tspan> · 胶囊按钮 <tspan fill="#00E5FF" font-weight="700">22-26dp</tspan> · 小徽章 <tspan fill="#00E5FF" font-weight="700">6dp</tspan></text>
+        <text x="3100" y="30" fill="#94A3B8" font-size="13">字阶规范: 标题 <tspan fill="#FFFFFF" font-weight="700">28-32sp</tspan> · 频道名 <tspan fill="#FFFFFF" font-weight="700">16-18sp</tspan> · 节目单 <tspan fill="#E2E8F0">14sp</tspan> · 辅助 <tspan fill="#64748B">12sp</tspan></text>
+    </g>
+    """)
+
+    svg.append('</svg>')
+    return "\n".join(svg)
+
+if __name__ == "__main__":
+    content = build_svg()
+    
+    # Save to docs/ and brain artifact dir
+    os.makedirs("/home/lijian/work/cabletv-player/docs", exist_ok=True)
+    doc_path = "/home/lijian/work/cabletv-player/docs/ui_prototype_spec.svg"
+    with open(doc_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"Generated spec to {doc_path}")
+
+    artifact_dir = "/home/lijian/.gemini/antigravity-cli/brain/463334b7-33f4-46bd-853a-b05c55c46ecc"
+    artifact_path = os.path.join(artifact_dir, "ui_prototype_spec.svg")
+    with open(artifact_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"Generated spec to {artifact_path}")

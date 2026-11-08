@@ -1,17 +1,29 @@
 package com.cabletv.player.ui;
 
 import android.content.Context;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.View;
 import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.DataSource;
+import com.bumptech.glide.load.engine.GlideException;
+import com.bumptech.glide.request.RequestListener;
+import com.bumptech.glide.request.target.Target;
 import com.cabletv.player.R;
+import com.cabletv.player.config.AppConfig;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -19,56 +31,45 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * The draggable time-shift (时移) seek bar shown over live playback and catchup (回看).
- * The track runs from the start of a fixed window ({@link #setWindow}) to its end; dragging
- * the thumb moves the playhead, and releasing commits the target time. The bar itself knows
- * nothing about catchup mechanics: it only maps a millisecond window to a seek bar and reports
- * a committed target through {@link OnSeekListener}. The "回直播" button jumps the playhead
- * back to the live edge.
+ * The unified playback & time-shift (时移/回看) HUD shown over live playback and catchup.
+ *
+ * <p>Combines channel information, channel logo, current programme title, scrubbable single-programme timeline,
+ * start/end time markers, fixed behind-live difference indicator, seek rate, and the live edge shortcut.
  */
 public class TimeShiftBarComponent extends FrameLayout {
-    /**
-     * Three rows: the channel and the way back to live, the track, and the programme under the
-     * playhead. It sits above the playback strip, so every row it takes is picture the viewer
-     * loses -- which is why the window endpoints were dropped from the layout.
-     */
-    private static final int BAR_HEIGHT_DP = 88;
-    private static final int ROW_HEIGHT_DP = 18;
-    /** Where the track sits; the seek bar's thumb is lined up on the same centre. */
-    private static final int TIMELINE_TOP_DP = 14;
-    /** The track's touch area; the drawn bar is thinner and centred inside it. */
-    private static final int TIMELINE_HEIGHT_DP = 26;
 
+    public static final int BAR_HEIGHT_DP = 126;
+
+    private final TextView mChannelNumView;
+    private final ImageView mLogoView;
     private final TextView mChannelLabel;
+    private final TextView mSourceBadge;
+    private final TextView mLiveBadge;
     private final TextView mBackToLive;
+
+    private final TextView mProgramTitle;
+    private final TextView mNextProgramView;
+
+    private final ProgramTimelineView mTimeline;
+
+    private final TextView mStartTimeLabel;
+    private final TextView mEndTimeLabel;
     private final TextView mTargetLabel;
     private final TextView mRateLabel;
-    private final TextView mProgramTitle;
     private final TextView mBehindLiveLabel;
-    private final ProgramTimelineView mTimeline;
+
     private OnSeekListener mSeekListener;
     private static final long AUTO_HIDE_MS = 6_000;
     private final Runnable mAutoHideRunnable = this::onAutoHide;
-    /**
-     * Whether a hide is waiting to happen. Tracked explicitly: a view that is not attached to a
-     * window queues its posts instead of handing them to a handler, so there is nothing to ask.
-     */
     private boolean mAutoHidePending;
-    /** True while the rate/distance reading occupies the corner the distance to live uses. */
     private boolean mRateVisible;
 
     private long mWindowStartMs = 0;
     private long mWindowEndMs = 0;
     private long mPositionMs = 0;
-    /** Where "now" is; the distance to live is measured from here, not from the window end. */
     private long mLivePointMs = 0;
-    /**
-     * True while the playhead follows the broadcast. In catchup it must not: the ticker would
-     * drag the thumb back to "now" one second after every seek, which looks exactly like the
-     * remote key doing nothing.
-     */
+    private long mFixedBehindMs = 0;
     private boolean mLiveMode = true;
-    /** True while the thumb is being dragged; live ticking pauses so the thumb stays put. */
     private boolean mDragging = false;
 
     public interface OnSeekListener {
@@ -81,65 +82,120 @@ public class TimeShiftBarComponent extends FrameLayout {
 
     public TimeShiftBarComponent(@NonNull Context context) {
         super(context);
-        setBackgroundResource(R.drawable.gradient_playback_info_bg);
-        setPadding(dp2px(16), dp2px(8), dp2px(16), dp2px(8));
+        applyOpacity();
+        setPadding(dp2px(20), dp2px(12), dp2px(20), dp2px(10));
         setVisibility(GONE);
-        // The whole strip eats its own touches so they never reach the activity gesture layer.
         setClickable(true);
 
-        LinearLayout header = new LinearLayout(context);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        addView(header, barRowParams(ROW_HEIGHT_DP, 0));
+        LinearLayout rootContainer = new LinearLayout(context);
+        rootContainer.setOrientation(LinearLayout.VERTICAL);
+        rootContainer.setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        addView(rootContainer);
+
+        // ================= ROW 1: Channel Info & Live/Catchup Controls =================
+        LinearLayout row1 = new LinearLayout(context);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        row1.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams r1Lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(28));
+        rootContainer.addView(row1, r1Lp);
+
+        mChannelNumView = new TextView(context);
+        mChannelNumView.setTextColor(0xFF00E5FF);
+        mChannelNumView.setTextSize(11);
+        mChannelNumView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        mChannelNumView.setGravity(Gravity.CENTER);
+        mChannelNumView.setBackgroundResource(R.drawable.bg_channel_num_pill);
+        mChannelNumView.setPadding(dp2px(6), dp2px(2), dp2px(6), dp2px(2));
+        LinearLayout.LayoutParams numLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp2px(20));
+        numLp.rightMargin = dp2px(8);
+        row1.addView(mChannelNumView, numLp);
+
+        mLogoView = new ImageView(context);
+        mLogoView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        mLogoView.setBackgroundResource(R.drawable.bg_channel_logo_holder);
+        mLogoView.setPadding(dp2px(3), dp2px(1), dp2px(3), dp2px(1));
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(
+                dp2px(38), dp2px(22));
+        logoLp.rightMargin = dp2px(10);
+        mLogoView.setLayoutParams(logoLp);
+        mLogoView.setVisibility(GONE);
+        row1.addView(mLogoView);
 
         mChannelLabel = new TextView(context);
         mChannelLabel.setTextColor(0xFFFFFFFF);
-        mChannelLabel.setTextSize(13);
+        mChannelLabel.setTextSize(16);
+        mChannelLabel.setTypeface(Typeface.DEFAULT_BOLD);
         mChannelLabel.setMaxLines(1);
-        header.addView(mChannelLabel, new LinearLayout.LayoutParams(
+        mChannelLabel.setEllipsize(TextUtils.TruncateAt.END);
+        row1.addView(mChannelLabel, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        mSourceBadge = new TextView(context);
+        mSourceBadge.setTextColor(0xFF94A3B8);
+        mSourceBadge.setTextSize(11);
+        mSourceBadge.setBackgroundResource(R.drawable.bg_date_capsule);
+        mSourceBadge.setPadding(dp2px(6), dp2px(2), dp2px(6), dp2px(2));
+        mSourceBadge.setVisibility(GONE);
+        LinearLayout.LayoutParams srcLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        srcLp.rightMargin = dp2px(12);
+        row1.addView(mSourceBadge, srcLp);
+
+        mLiveBadge = new TextView(context);
+        mLiveBadge.setTextColor(0xFF00E676);
+        mLiveBadge.setTextSize(12);
+        mLiveBadge.setTypeface(Typeface.DEFAULT_BOLD);
+        mLiveBadge.setText(R.string.live_indicator);
+        mLiveBadge.setVisibility(VISIBLE);
+        row1.addView(mLiveBadge, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         mBackToLive = new TextView(context);
         mBackToLive.setText(R.string.back_to_live);
-        mBackToLive.setTextColor(0xFFFF9966);
+        mBackToLive.setTextColor(0xFFFFFFFF);
         mBackToLive.setTextSize(12);
-        mBackToLive.setPadding(dp2px(8), 0, dp2px(2), 0);
+        mBackToLive.setTypeface(Typeface.DEFAULT_BOLD);
+        mBackToLive.setBackgroundResource(R.drawable.apple_pill_button);
+        mBackToLive.setPadding(dp2px(12), dp2px(4), dp2px(12), dp2px(4));
+        mBackToLive.setVisibility(GONE);
+        mBackToLive.setFocusable(true);
         mBackToLive.setOnClickListener(v -> {
             if (mSeekListener != null) {
                 mSeekListener.onBackToLive();
             }
         });
+        row1.addView(mBackToLive, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        // Where the playhead is, in the first row: the programme row below is kept for the one
-        // thing the viewer is looking for there, the name of what is playing.
-        mTargetLabel = new TextView(context);
-        mTargetLabel.setTextColor(0xFFFF9966);
-        mTargetLabel.setTextSize(11);
-        mTargetLabel.setPadding(0, 0, dp2px(8), 0);
-        header.addView(mTargetLabel, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
-        header.addView(mBackToLive, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT));
+        // ================= ROW 2: Program Names =================
+        LinearLayout row2 = new LinearLayout(context);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        row2.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams r2Lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(20));
+        r2Lp.topMargin = dp2px(4);
+        rootContainer.addView(row2, r2Lp);
 
-        mRateLabel = new TextView(context);
-        mRateLabel.setTextColor(0xFFFF9966);
-        mRateLabel.setTextSize(12);
-        mRateLabel.setGravity(Gravity.END);
-        mRateLabel.setMaxLines(1);
-        mRateLabel.setVisibility(GONE);
-        // Same corner as the distance to live, which it replaces while a key is held: two
-        // readings on top of each other were both unreadable, and a fixed 56dp box cut the
-        // longer "4x · -133s" off.
-        FrameLayout.LayoutParams rateLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, dp2px(ROW_HEIGHT_DP),
-                Gravity.END | Gravity.TOP);
-        rateLp.topMargin = dp2px(TIMELINE_TOP_DP + TIMELINE_HEIGHT_DP + 2);
-        addView(mRateLabel, rateLp);
+        mProgramTitle = new TextView(context);
+        mProgramTitle.setTextColor(0xFFE2E8F0);
+        mProgramTitle.setTextSize(14);
+        mProgramTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        mProgramTitle.setMaxLines(1);
+        mProgramTitle.setEllipsize(TextUtils.TruncateAt.END);
+        row2.addView(mProgramTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f));
 
-        // The timeline is both the picture of the guide and the control: one track, one marker.
-        // It used to be drawn under a system seek bar, which put a second thumb on a different
-        // scale -- the two markers never lined up.
+        mNextProgramView = new TextView(context);
+        mNextProgramView.setTextColor(0xFF64748B);
+        mNextProgramView.setTextSize(12);
+        mNextProgramView.setMaxLines(1);
+        mNextProgramView.setEllipsize(TextUtils.TruncateAt.END);
+        row2.addView(mNextProgramView, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        // ================= ROW 3: Single Program Timeline =================
         mTimeline = new ProgramTimelineView(context);
         mTimeline.setOnScrubListener(new ProgramTimelineView.OnScrubListener() {
             @Override
@@ -151,6 +207,10 @@ public class TimeShiftBarComponent extends FrameLayout {
             @Override
             public void onScrubTo(long timeMs) {
                 mPositionMs = timeMs;
+                if (!mLiveMode) {
+                    long now = mLivePointMs > 0 ? mLivePointMs : System.currentTimeMillis();
+                    mFixedBehindMs = Math.max(0, now - mPositionMs);
+                }
                 updateLabels();
             }
 
@@ -161,63 +221,154 @@ public class TimeShiftBarComponent extends FrameLayout {
                 scheduleAutoHide();
             }
         });
-        addView(mTimeline, barRowParams(TIMELINE_HEIGHT_DP, TIMELINE_TOP_DP));
+        LinearLayout.LayoutParams tlLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(22));
+        tlLp.topMargin = dp2px(4);
+        rootContainer.addView(mTimeline, tlLp);
 
-        // The programme that is playing, named under the track.
-        mProgramTitle = new TextView(context);
-        mProgramTitle.setTextColor(0xFFFFFFFF);
-        mProgramTitle.setTextSize(13);
-        mProgramTitle.setMaxLines(1);
-        mProgramTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        FrameLayout.LayoutParams titleLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, dp2px(ROW_HEIGHT_DP),
-                Gravity.START | Gravity.TOP);
-        titleLp.topMargin = dp2px(TIMELINE_TOP_DP + TIMELINE_HEIGHT_DP + 2);
-        titleLp.rightMargin = dp2px(96);
-        addView(mProgramTitle, titleLp);
+        // ================= ROW 4: Time Labels & Status Row =================
+        FrameLayout row4 = new FrameLayout(context);
+        LinearLayout.LayoutParams r4Lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp2px(18));
+        r4Lp.topMargin = dp2px(2);
+        rootContainer.addView(row4, r4Lp);
 
-        // How far behind the live edge the playhead is.
+        mStartTimeLabel = new TextView(context);
+        mStartTimeLabel.setTextColor(0xFF64748B);
+        mStartTimeLabel.setTextSize(11);
+        mStartTimeLabel.setTypeface(Typeface.MONOSPACE);
+        FrameLayout.LayoutParams startLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.START | Gravity.CENTER_VERTICAL);
+        row4.addView(mStartTimeLabel, startLp);
+
+        LinearLayout centerGroup = new LinearLayout(context);
+        centerGroup.setOrientation(LinearLayout.HORIZONTAL);
+        centerGroup.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams centerLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER);
+        row4.addView(centerGroup, centerLp);
+
+        mTargetLabel = new TextView(context);
+        mTargetLabel.setTextColor(0xFF00E5FF);
+        mTargetLabel.setTextSize(11);
+        mTargetLabel.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        mTargetLabel.setPadding(0, 0, dp2px(8), 0);
+        centerGroup.addView(mTargetLabel);
+
         mBehindLiveLabel = new TextView(context);
-        mBehindLiveLabel.setTextColor(0xFF94A3B8);
+        mBehindLiveLabel.setTextColor(0xFFFF7A00);
         mBehindLiveLabel.setTextSize(11);
-        // Right-aligned in the programme row, opposite the programme name.
-        FrameLayout.LayoutParams behindLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, dp2px(ROW_HEIGHT_DP),
-                Gravity.END | Gravity.TOP);
-        behindLp.topMargin = dp2px(TIMELINE_TOP_DP + TIMELINE_HEIGHT_DP + 2);
-        addView(mBehindLiveLabel, behindLp);
+        mBehindLiveLabel.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        mBehindLiveLabel.setBackgroundResource(R.drawable.bg_hud_behind_live);
+        mBehindLiveLabel.setPadding(dp2px(8), dp2px(2), dp2px(8), dp2px(2));
+        mBehindLiveLabel.setVisibility(GONE);
+        centerGroup.addView(mBehindLiveLabel);
 
+        mRateLabel = new TextView(context);
+        mRateLabel.setTextColor(0xFF00E5FF);
+        mRateLabel.setTextSize(12);
+        mRateLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        mRateLabel.setVisibility(GONE);
+        centerGroup.addView(mRateLabel);
+
+        mEndTimeLabel = new TextView(context);
+        mEndTimeLabel.setTextColor(0xFF64748B);
+        mEndTimeLabel.setTextSize(11);
+        mEndTimeLabel.setTypeface(Typeface.MONOSPACE);
+        FrameLayout.LayoutParams endLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.END | Gravity.CENTER_VERTICAL);
+        row4.addView(mEndTimeLabel, endLp);
     }
 
-    /**
-     * Keeps the strip on screen while the viewer is seeking with the remote.
-     *
-     * <p>It normally fades away after six seconds; during a seek the rate indicator has to stay
-     * visible, or the viewer is told nothing about what the key is doing.
-     */
+    public void setChannelInfo(String name, int channelNumber, int urlIndex, int urlCount) {
+        setChannelInfo(name, channelNumber, urlIndex, urlCount, null);
+    }
+
+    public void setChannelInfo(String name, int channelNumber, int urlIndex, int urlCount, @Nullable String logoUrl) {
+        if (mChannelLabel != null) {
+            mChannelLabel.setText(name);
+        }
+        if (mChannelNumView != null) {
+            if (channelNumber > 0) {
+                mChannelNumView.setText(String.format(Locale.getDefault(), "%02d", channelNumber));
+                mChannelNumView.setVisibility(VISIBLE);
+            } else {
+                mChannelNumView.setVisibility(GONE);
+            }
+        }
+        if (mSourceBadge != null) {
+            if (urlCount > 1) {
+                mSourceBadge.setText(getContext().getString(R.string.source_switched, "", urlIndex, urlCount).trim());
+                mSourceBadge.setVisibility(VISIBLE);
+            } else {
+                mSourceBadge.setVisibility(GONE);
+            }
+        }
+        if (mLogoView != null) {
+            if (logoUrl != null && !logoUrl.trim().isEmpty()) {
+                mLogoView.setVisibility(VISIBLE);
+                try {
+                    Glide.with(getContext())
+                            .load(logoUrl.trim())
+                            .listener(new RequestListener<Drawable>() {
+                                @Override
+                                public boolean onLoadFailed(@Nullable GlideException e, Object model, Target<Drawable> target, boolean isFirstResource) {
+                                    mLogoView.post(() -> mLogoView.setVisibility(GONE));
+                                    return false;
+                                }
+
+                                @Override
+                                public boolean onResourceReady(Drawable resource, Object model, Target<Drawable> target, DataSource dataSource, boolean isFirstResource) {
+                                    mLogoView.setVisibility(VISIBLE);
+                                    return false;
+                                }
+                            })
+                            .into(mLogoView);
+                } catch (Exception e) {
+                    mLogoView.setImageDrawable(null);
+                    mLogoView.setVisibility(GONE);
+                }
+            } else {
+                mLogoView.setImageDrawable(null);
+                mLogoView.setVisibility(GONE);
+            }
+        }
+    }
+
+    public void setProgramInfo(String currentProgram, String nextProgram) {
+        if (mProgramTitle != null) {
+            if (currentProgram != null && !currentProgram.isEmpty()) {
+                mProgramTitle.setText(getContext().getString(R.string.playing_now, currentProgram));
+            } else {
+                mProgramTitle.setText(R.string.no_epg_data);
+            }
+        }
+        if (mNextProgramView != null) {
+            if (nextProgram != null && !nextProgram.isEmpty()) {
+                mNextProgramView.setText(getContext().getString(R.string.next_program, nextProgram));
+                mNextProgramView.setVisibility(VISIBLE);
+            } else {
+                mNextProgramView.setText("");
+                mNextProgramView.setVisibility(GONE);
+            }
+        }
+    }
+
     public void showWhileSeeking() {
         cancelAutoHide();
         clearAnimation();
-        // The fade-out leaves the alpha at zero, so the bar would stay invisible if only the
-        // visibility were restored.
         setAlpha(1f);
         setVisibility(VISIBLE);
     }
 
-    /**
-     * Ends a seek: the rate indicator goes away and the strip starts counting down to hiding
-     * again. Without this it stayed on screen for the rest of the programme, because
-     * {@link #showWhileSeeking()} had cancelled the only thing that would ever hide it.
-     */
     public void endSeeking() {
         hideSeekRate();
         scheduleAutoHide();
     }
 
-    /**
-     * Shows the acceleration rate while the remote is held down (2x, 3x, 4x), the way the
-     * Apple TV remote reports the speed it is rewinding at.
-     */
     public void showSeekRate(int rate) {
         if (mRateLabel == null) {
             return;
@@ -228,12 +379,6 @@ public class TimeShiftBarComponent extends FrameLayout {
         mRateLabel.setVisibility(VISIBLE);
     }
 
-    /**
-     * Shows the rate the key is seeking at and how far it has travelled.
-     *
-     * <p>Both belong on screen at once: the rate says how fast the playhead moves, the distance
-     * says where it is going.
-     */
     public void showSeekPreview(int rate, long deltaMs) {
         if (mRateLabel == null) {
             return;
@@ -245,7 +390,6 @@ public class TimeShiftBarComponent extends FrameLayout {
         mRateLabel.setVisibility(VISIBLE);
     }
 
-    /** Hides the rate indicator when the key is released. */
     public void hideSeekRate() {
         mRateVisible = false;
         if (mRateLabel != null) {
@@ -254,66 +398,44 @@ public class TimeShiftBarComponent extends FrameLayout {
         updateBehindLive();
     }
 
-    /** The drawn track, so tests can drive its touch handling (used by tests). */
     ProgramTimelineView findTimeline() {
         return mTimeline;
     }
 
-    /** The HH:mm label currently shown for the playhead (used by tests). */
     String findShownPositionLabel() {
         return mTargetLabel.getText().toString();
     }
 
-    /** The playhead in epoch millis (used by tests). */
     long findShownPositionMs() {
         return mPositionMs;
     }
 
-    /** How far behind live the strip currently reports (used by tests). */
     long findBehindLiveMs() {
+        if (mFixedBehindMs > 0) {
+            return mFixedBehindMs;
+        }
         return mLivePointMs > 0 ? mLivePointMs - mPositionMs : 0;
     }
 
-    /** Whether a hide is scheduled (used by tests). */
     boolean hasPendingAutoHide() {
         return mAutoHidePending;
     }
 
-    /**
-     * @return layout params that anchor this bar just above the playback info strip, or flat
-     *         against the bottom edge on a screen too short for both.
-     */
     public FrameLayout.LayoutParams createBottomLayoutParams() {
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 dp2px(BAR_HEIGHT_DP));
         lp.gravity = Gravity.BOTTOM;
-        lp.bottomMargin = dp2px(bottomMarginDp(screenHeightDp()));
+        lp.setMargins(dp2px(32), 0, dp2px(32), dp2px(24));
         return lp;
     }
 
-    /** How much room the strip above the playback info strip needs, in dp. */
     private static final int INFO_BAR_HEIGHT_DP = 100;
-    /** Space left under the bar when it has to sit on top of the info strip. */
     private static final int COMPACT_MARGIN_DP = 8;
-    /** A little air so the two strips never touch. */
     private static final int MIN_GAP_DP = 24;
 
-    private int screenHeightDp() {
-        android.util.DisplayMetrics m = getResources().getDisplayMetrics();
-        return m.heightPixels == 0 ? 0 : Math.round(m.heightPixels / m.density);
-    }
-
-    /**
-     * Where the bar sits from the bottom edge.
-     *
-     * <p>Normally it clears the info strip. On a short screen (a phone held sideways) the two
-     * strips together are taller than the display, and the old fixed 100dp margin pushed the
-     * whole bar off the top: the viewer tapped the picture and no progress control appeared.
-     * There the bar wins and covers the info strip -- moving the playhead matters more.
-     */
     static int bottomMarginDp(int screenHeightDp) {
-        int needed = BAR_HEIGHT_DP + INFO_BAR_HEIGHT_DP + MIN_GAP_DP;
+        int needed = 88 + INFO_BAR_HEIGHT_DP + MIN_GAP_DP;
         return screenHeightDp >= needed ? INFO_BAR_HEIGHT_DP : COMPACT_MARGIN_DP;
     }
 
@@ -321,60 +443,59 @@ public class TimeShiftBarComponent extends FrameLayout {
         mSeekListener = listener;
     }
 
-    /** Set the draggable window (in epoch millis) and where the playhead currently sits. */
     public void setWindow(long windowStartMs, long windowEndMs, long positionMs) {
         mWindowStartMs = windowStartMs;
         mWindowEndMs = Math.max(windowStartMs + 1000, windowEndMs);
         mPositionMs = Math.max(windowStartMs, Math.min(mWindowEndMs, positionMs));
         mTimeline.setWindow(mWindowStartMs, mWindowEndMs, mPositionMs);
+        if (!mLiveMode) {
+            long now = mLivePointMs > 0 ? mLivePointMs : System.currentTimeMillis();
+            mFixedBehindMs = Math.max(0, now - mPositionMs);
+        } else {
+            mFixedBehindMs = 0;
+        }
         updateLabels();
     }
 
-    /** Whether the playhead has moved past the last programme the track knows about. */
+    public long getWindowStart() {
+        return mWindowStartMs;
+    }
+
+    public long getWindowEnd() {
+        return mWindowEndMs;
+    }
+
     public boolean isPastLastProgramme() {
         return mTimeline.isPastLastSegment();
     }
 
-    /**
-     * The programmes the timeline draws, taken from the guide.
-     *
-     * <p>Without a guide the track stays empty; the bar keeps working exactly as before.
-     */
     public void setPrograms(List<ProgramTimelineView.Segment> segments) {
         mTimeline.setSegments(segments);
         updateProgramTitle();
     }
 
-    /** Marks the right end of the track as the live edge. */
     public void setLiveEdgeVisible(boolean visible) {
         mTimeline.setLiveEdgeVisible(visible);
     }
 
-    /** The programme under the playhead, named above the track. */
     private void updateProgramTitle() {
         String title = null;
         for (ProgramTimelineView.Segment segment : mTimeline.getSegments()) {
-            // Inclusive at the end: while watching live the playhead sits exactly on the window
-            // end, and an exclusive comparison left the programme unnamed.
             if (mPositionMs >= segment.startTime && mPositionMs <= segment.endTime) {
                 title = segment.title;
                 break;
             }
         }
-        if (title == null || title.isEmpty()) {
-            mProgramTitle.setVisibility(GONE);
-            return;
+        if (title != null && !title.isEmpty()) {
+            mProgramTitle.setText(getContext().getString(R.string.playing_now, title));
         }
-        mProgramTitle.setVisibility(VISIBLE);
-        mProgramTitle.setText(title);
     }
 
-    /** How far behind the live edge the playhead is, in the compact form "1:23:45". */
     static String formatBehind(long behindMs) {
         if (behindMs <= 0) {
             return "0:00";
         }
-        long total = behindMs / 1000;
+        long total = (behindMs + 500) / 1000;
         long hours = total / 3600;
         long minutes = (total % 3600) / 60;
         long seconds = total % 60;
@@ -384,14 +505,12 @@ public class TimeShiftBarComponent extends FrameLayout {
         return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds);
     }
 
-    /**
-     * Commits a playhead position: puts the marker there and reports it.
-     *
-     * <p>The single way a position is committed, whether the viewer dragged the track or a test
-     * asks for one, so both follow the same rules.
-     */
     void commitPosition(long timeMs) {
         mPositionMs = Math.max(mWindowStartMs, Math.min(mWindowEndMs, timeMs));
+        if (!mLiveMode) {
+            long now = mLivePointMs > 0 ? mLivePointMs : System.currentTimeMillis();
+            mFixedBehindMs = Math.max(0, now - mPositionMs);
+        }
         updateLabels();
         if (mSeekListener != null) {
             mSeekListener.onSeekTo(mPositionMs);
@@ -404,29 +523,29 @@ public class TimeShiftBarComponent extends FrameLayout {
 
     public void setBackToLiveVisible(boolean visible) {
         mBackToLive.setVisibility(visible ? VISIBLE : GONE);
+        mLiveBadge.setVisibility(visible ? GONE : VISIBLE);
     }
 
     private void updateLabels() {
         SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
-        mTargetLabel.setText(getContext().getString(R.string.timeshift_position,
-                timeFmt.format(new Date(mPositionMs))));
+        mTargetLabel.setText(timeFmt.format(new Date(mPositionMs)));
+        mStartTimeLabel.setText(timeFmt.format(new Date(mWindowStartMs)));
+        mEndTimeLabel.setText(timeFmt.format(new Date(mWindowEndMs)));
         mTimeline.setPosition(mPositionMs);
-        updateProgramTitle();
-        // The distance to live is measured from "now". The window end carries a long catchup
-        // tail, so using it said "8 hours behind live" while the playhead sat at the live edge.
         updateBehindLive();
     }
 
-    /** The distance to live, unless a held key is using that corner for its own reading. */
     private void updateBehindLive() {
         if (mRateVisible) {
             mBehindLiveLabel.setVisibility(GONE);
             return;
         }
-        long behind = mLivePointMs > 0 ? mLivePointMs - mPositionMs : 0;
-        // Under a couple of seconds there is nothing to report: while watching live the figure
-        // would just flicker between 0 and 1.
-        if (behind > 2000) {
+        long behind = mFixedBehindMs;
+        if (behind <= 0 && !mLiveMode) {
+            long now = mLivePointMs > 0 ? mLivePointMs : System.currentTimeMillis();
+            behind = Math.max(0, now - mPositionMs);
+        }
+        if (!mLiveMode && behind > 2000) {
             mBehindLiveLabel.setVisibility(VISIBLE);
             mBehindLiveLabel.setText(getContext().getString(R.string.timeshift_behind_live,
                     formatBehind(behind)));
@@ -435,12 +554,6 @@ public class TimeShiftBarComponent extends FrameLayout {
         }
     }
 
-    /**
-     * Moves the thumb to where playback actually is, without touching auto-hide or visibility.
-     *
-     * <p>A replay advances on its own, so the strip has to follow it; rebuilding the whole window
-     * every second would keep resetting the countdown that hides the strip.
-     */
     public void setPlaybackPosition(long positionMs) {
         if (mDragging) {
             return;
@@ -454,26 +567,16 @@ public class TimeShiftBarComponent extends FrameLayout {
         updateLabels();
     }
 
-    /**
-     * Keeps the thumb advancing with real time, and only that.
-     *
-     * <p>While a catchup is running the playhead belongs to the viewer, so the ticker leaves it
-     * alone. It still refreshes the distance to live, which does keep growing.
-     */
     public void tickIfIdle() {
         tickIfIdle(System.currentTimeMillis());
     }
 
-    /** The tick, with the clock handed in so tests can let time pass deterministically. */
     void tickIfIdle(long now) {
         if (mDragging || getVisibility() != VISIBLE) {
             return;
         }
         mLivePointMs = now;
         if (mLiveMode) {
-            // Live playback hands the bar a window ending at "now", so the end has to move with
-            // the clock. Holding it still froze the thumb on the moment the bar was opened, while
-            // the distance to live kept growing -- the two readings contradicted each other.
             mWindowEndMs = Math.max(mWindowEndMs, now);
             mPositionMs = now;
             mTimeline.setWindow(mWindowStartMs, mWindowEndMs, mPositionMs);
@@ -481,19 +584,62 @@ public class TimeShiftBarComponent extends FrameLayout {
         updateLabels();
     }
 
-    /**
-     * Tells the strip whether the playhead follows the broadcast or a replay.
-     *
-     * @param liveMode true while watching live, false during a catchup
-     * @param livePointMs where "now" is, used for the distance to live
-     */
     public void setLiveMode(boolean liveMode, long livePointMs) {
         mLiveMode = liveMode;
         mLivePointMs = livePointMs;
+        if (!liveMode) {
+            mFixedBehindMs = Math.max(0, livePointMs - mPositionMs);
+        } else {
+            mFixedBehindMs = 0;
+        }
         mTimeline.setLiveEdgeVisible(liveMode);
+        mLiveBadge.setVisibility(liveMode ? VISIBLE : GONE);
+        mBackToLive.setVisibility(!liveMode ? VISIBLE : GONE);
+        updateBehindLive();
+    }
+
+    /**
+     * Updates the background gradient opacity according to user preference in AppConfig.
+     * Follows the same alpha scale as the channel guide:
+     * - TRANSLUCENT: 0xB3 (top 70%) / 0xC0 (bottom 75%)
+     * - SEMI_OPAQUE: 0xE0 (top 88%) / 0xE6 (bottom 90%)
+     * - OPAQUE:      0xFF (top 100%) / 0xFF (bottom 100%)
+     */
+    public void applyOpacity() {
+        int level = AppConfig.getSidebarOpacity();
+        int startColor;
+        int endColor;
+        int strokeColor;
+        switch (level) {
+            case AppConfig.SIDEBAR_OPAQUE:
+                startColor = 0xFF141C28;
+                endColor = 0xFF0A0E17;
+                strokeColor = 0x33FFFFFF;
+                break;
+            case AppConfig.SIDEBAR_SEMI_OPAQUE:
+                // Enhanced semi-opaque: deep obsidian tint (~88%-90% opacity)
+                startColor = 0xE0141C28;
+                endColor = 0xE60A0E17;
+                strokeColor = 0x2CFFFFFF;
+                break;
+            default: // SIDEBAR_TRANSLUCENT
+                // Enhanced translucent: crisp contrast (~70%-75% opacity)
+                startColor = 0xB3141C28;
+                endColor = 0xC00A0E17;
+                strokeColor = 0x22FFFFFF;
+                break;
+        }
+        GradientDrawable gd = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] { startColor, endColor });
+        gd.setShape(GradientDrawable.RECTANGLE);
+        gd.setCornerRadius(dp2px(20));
+        gd.setStroke(dp2px(1), strokeColor);
+        setBackground(gd);
     }
 
     public void show() {
+        applyOpacity();
         removeCallbacks(mAutoHideRunnable);
         clearAnimation();
         setAlpha(1f);
@@ -536,15 +682,6 @@ public class TimeShiftBarComponent extends FrameLayout {
     private void onAutoHide() {
         mAutoHidePending = false;
         hideSmooth();
-    }
-
-    /** A row of the strip: full width, fixed height, placed down from the top edge. */
-    private FrameLayout.LayoutParams barRowParams(int heightDp, int topMarginDp) {
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, dp2px(heightDp));
-        lp.gravity = Gravity.TOP;
-        lp.topMargin = dp2px(topMarginDp);
-        return lp;
     }
 
     private int dp2px(int dp) {

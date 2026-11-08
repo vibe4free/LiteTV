@@ -113,10 +113,12 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
     public ChannelViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
         LinearLayout view = new LinearLayout(mContext);
         view.setOrientation(LinearLayout.VERTICAL);
-        view.setLayoutParams(new RecyclerView.LayoutParams(
+        RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
                 RecyclerView.LayoutParams.MATCH_PARENT,
-                dp2px(ChannelListComponent.CHANNEL_ROW_HEIGHT_DP)));
-        view.setPadding(dp2px(8), dp2px(8), dp2px(8), dp2px(8));
+                dp2px(ChannelListComponent.CHANNEL_ROW_HEIGHT_DP));
+        lp.setMargins(dp2px(6), dp2px(2), dp2px(6), dp2px(2));
+        view.setLayoutParams(lp);
+        view.setPadding(dp2px(8), dp2px(4), dp2px(8), dp2px(4));
         return new ChannelViewHolder(view, mContext, mScroller);
     }
 
@@ -157,11 +159,13 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
             this.context = context;
             this.container = itemView;
             container.setOrientation(LinearLayout.HORIZONTAL);
+            container.setGravity(Gravity.CENTER_VERTICAL);
 
             // The number the viewer can type on the remote to reach this channel
             numberView = new TextView(context);
-            numberView.setTextColor(0xFF888888);
-            numberView.setTextSize(12);
+            numberView.setTextColor(0xFF64748B);
+            numberView.setTextSize(13);
+            numberView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
             numberView.setSingleLine(true);
             numberView.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
             numberView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -169,19 +173,22 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
                     LinearLayout.LayoutParams.MATCH_PARENT));
             container.addView(numberView);
 
-            // Logo
+            // Logo with refined background pill holder
             logoView = new ImageView(context);
             logoView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            logoView.setBackgroundResource(R.drawable.bg_channel_logo_holder);
+            logoView.setPadding(dp2px(4), dp2px(2), dp2px(4), dp2px(2));
             LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(
-                    dp2px(36),
-                    dp2px(36));
-            logoParams.leftMargin = dp2px(6);
+                    dp2px(42),
+                    dp2px(34));
+            logoParams.leftMargin = dp2px(8);
             logoView.setLayoutParams(logoParams);
             container.addView(logoView);
 
             // Text container
             textContainer = new LinearLayout(context);
             textContainer.setOrientation(LinearLayout.VERTICAL);
+            textContainer.setGravity(Gravity.CENTER_VERTICAL);
             textContainer.setLayoutParams(new LinearLayout.LayoutParams(
                     0,
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -189,8 +196,9 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
             textContainer.setPadding(dp2px(8), 0, 0, 0);
 
             nameView = new TextView(context);
-            nameView.setTextColor(0xFFCCCCCC);
+            nameView.setTextColor(0xFFE2E8F0);
             nameView.setTextSize(16);
+            nameView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
             nameView.setSingleLine(true);
             nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
             nameView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -199,8 +207,8 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
             textContainer.addView(nameView);
 
             epgView = new TextView(context);
-            epgView.setTextColor(0xFF888888);
-            epgView.setTextSize(13);
+            epgView.setTextColor(0xFF64748B);
+            epgView.setTextSize(12);
             epgView.setMaxLines(1);
             epgView.setEllipsize(android.text.TextUtils.TruncateAt.END);
             epgView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -212,7 +220,7 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
 
             favoriteView = new TextView(context);
             favoriteView.setText("★");
-            favoriteView.setTextColor(0xFFFFC04D);
+            favoriteView.setTextColor(0xFFFFB800);
             favoriteView.setTextSize(13);
             favoriteView.setGravity(Gravity.CENTER_VERTICAL);
             favoriteView.setLayoutParams(new LinearLayout.LayoutParams(
@@ -251,17 +259,19 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
             }
 
             if (isSelected && focusOnChannels) {
-                nameView.setTextColor(0xFFFF6B35);
+                nameView.setTextColor(0xFF00E5FF);
+                numberView.setTextColor(0xFF00E5FF);
                 nameView.setTextSize(17);
                 container.setBackgroundResource(R.drawable.channel_item_selected_bg);
                 container.animate()
-                        .scaleX(1.04f)
-                        .scaleY(1.04f)
+                        .scaleX(1.03f)
+                        .scaleY(1.03f)
                         .setDuration(150)
                         .start();
             } else if (isSelected && !focusOnChannels) {
                 // Selected but focus on another panel - dimmer highlight
-                nameView.setTextColor(0xFFFF9966);
+                nameView.setTextColor(0xFF66E5FF);
+                numberView.setTextColor(0xFF66E5FF);
                 nameView.setTextSize(16);
                 container.setBackgroundResource(R.drawable.channel_item_selected_dim_bg);
                 container.animate()
@@ -271,6 +281,7 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
                         .start();
             } else if (isCurrent) {
                 nameView.setTextColor(0xFFFFFFFF);
+                numberView.setTextColor(0xFF00E676);
                 nameView.setTextSize(16);
                 container.setBackgroundColor(0x00000000);
                 container.animate()
@@ -279,7 +290,8 @@ public class ChannelListAdapter extends RecyclerView.Adapter<ChannelListAdapter.
                         .setDuration(150)
                         .start();
             } else {
-                nameView.setTextColor(0xFFCCCCCC);
+                nameView.setTextColor(0xFFE2E8F0);
+                numberView.setTextColor(0xFF64748B);
                 nameView.setTextSize(16);
                 container.setBackgroundColor(0x00000000);
                 container.animate()

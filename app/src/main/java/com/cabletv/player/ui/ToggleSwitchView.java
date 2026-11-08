@@ -52,13 +52,11 @@ public class ToggleSwitchView extends View {
         super(context, attrs);
         setFocusable(true);
         setClickable(true);
-        mTrackPaint.setColor(Color.parseColor("#3A3A3C"));
+        mTrackPaint.setColor(Color.parseColor("#1E293B"));
         mKnobPaint.setColor(Color.WHITE);
         mFocusPaint.setStyle(Paint.Style.STROKE);
         mFocusPaint.setStrokeWidth(dp2px(2));
-        // White, not the accent colour: the track is already orange when the switch is on, and a
-        // ring in the same colour would be invisible exactly when it matters most.
-        mFocusPaint.setColor(Color.WHITE);
+        mFocusPaint.setColor(Color.parseColor("#00E5FF"));
     }
 
     public boolean isChecked() {
@@ -92,8 +90,8 @@ public class ToggleSwitchView extends View {
         float inset = dp2px(1);
         mTrackRect.set(inset, inset, getWidth() - inset, getHeight() - inset);
         mTrackPaint.setColor(mChecked
-                ? Color.parseColor("#FF6B35")
-                : Color.parseColor("#3A3A3C"));
+                ? Color.parseColor("#00E5FF")
+                : Color.parseColor("#1E293B"));
         canvas.drawRoundRect(mTrackRect, getHeight() / 2f, getHeight() / 2f, mTrackPaint);
 
         float knobSize = dp2px(KNOB_SIZE_DP);
@@ -101,6 +99,7 @@ public class ToggleSwitchView extends View {
         float left = mChecked ? mTrackRect.right - margin - knobSize : mTrackRect.left + margin;
         mKnobRect.set(left, mTrackRect.top + margin, left + knobSize,
                 mTrackRect.top + margin + knobSize);
+        mKnobPaint.setColor(mChecked ? Color.parseColor("#0A0E17") : Color.WHITE);
         canvas.drawOval(mKnobRect, mKnobPaint);
 
         if (isFocused()) {

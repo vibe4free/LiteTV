@@ -1,37 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#212121</color>
-    <color name="colorPrimaryDark">#000000</color>
-    <color name="colorAccent">#FF6B35</color>
+    <color name="colorPrimary">#0D111A</color>
+    <color name="colorPrimaryDark">#070A0F</color>
+    <!-- Modern Electric Cyan as primary accent, matching Modern TV OS style -->
+    <color name="colorAccent">#00E5FF</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>
-    <color name="overlay_dark">#B3000000</color>
+    <color name="overlay_dark">#D90D111A</color>
     <color name="text_primary">#FFFFFF</color>
-    <color name="text_secondary">#CCCCCC</color>
-    <color name="item_selected_bg">#33FF6B35</color>
-    <color name="item_selected_dim_bg">#1AFF6B35</color>
-    <color name="item_selected_text">#FF6B35</color>
-    <color name="item_selected_dim_text">#FF9966</color>
-    <color name="epg_text_color">#888888</color>
-    <color name="next_program_text">#999999</color>
-    <color name="bg_overlay_start">#CC000000</color>
-    <color name="bg_overlay_end">#66000000</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="text_muted">#64748B</color>
 
-    <!--
-        The settings panel follows the Apple TV look: a black ground, one accent colour, and
-        greys for everything that is not the accent. The panel itself is nearly opaque so the
-        picture beside it stays the brighter thing on the screen.
-    -->
-    <!--
-        Fully opaque on purpose. A translucent panel leaves the window "transparent" there, and
-        the television then punches the video layer through it: the panel is drawn but never
-        reaches the screen. The picture stays visible on the left third, which is the point.
-    -->
-    <color name="apple_panel_bg">#FF000000</color>
-    <color name="apple_row_focus">#26FF6B35</color>
-    <color name="apple_border">#2A2A2E</color>
-    <color name="apple_pill_pressed">#1AFFFFFF</color>
-    <color name="apple_section_title">#FF8A8A8E</color>
+    <!-- Specific semantic accents -->
+    <color name="accent_cyan">#00E5FF</color>
+    <color name="accent_orange">#FF7A00</color>
+    <color name="status_live">#00E676</color>
+    <color name="bg_night">#0D111A</color>
+    <color name="bg_card">#141B26</color>
+    <color name="card_border">#1E293B</color>
+
+    <!-- Sidebar & Channel selection -->
+    <color name="item_selected_bg">#2600E5FF</color>
+    <color name="item_selected_dim_bg">#1200E5FF</color>
+    <color name="item_selected_text">#00E5FF</color>
+    <color name="item_selected_dim_text">#66E5FF</color>
+    <color name="epg_text_color">#94A3B8</color>
+    <color name="next_program_text">#64748B</color>
+    <color name="bg_overlay_start">#E60D111A</color>
+    <color name="bg_overlay_end">#800D111A</color>
+
+    <!-- Modern Apple TV / Leanback Settings Panel -->
+    <color name="apple_panel_bg">#FF0D111A</color>
+    <color name="apple_row_focus">#2400E5FF</color>
+    <color name="apple_border">#1E293B</color>
+    <color name="apple_pill_pressed">#2600E5FF</color>
+    <color name="apple_section_title">#00E5FF</color>
     <color name="apple_text_primary">#FFF8FAFC</color>
     <color name="apple_text_secondary">#FF94A3B8</color>
 </resources>

@@ -1,6 +1,7 @@
 package com.cabletv.player.ui;
 
 import android.content.Context;
+import android.view.Gravity;
 import android.view.View;
 import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
@@ -34,7 +35,12 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
     }
 
     private void initView(Context context) {
-        setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, dp2px(100)));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT,
+                dp2px(108));
+        lp.gravity = Gravity.BOTTOM;
+        lp.setMargins(dp2px(32), 0, dp2px(32), dp2px(24));
+        setLayoutParams(lp);
         setBackgroundResource(R.drawable.gradient_playback_info_bg);
 
         mInfoContainer = new LinearLayout(context);
@@ -42,18 +48,20 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
         mInfoContainer.setLayoutParams(new FrameLayout.LayoutParams(
                 LayoutParams.MATCH_PARENT,
                 LayoutParams.MATCH_PARENT));
-        mInfoContainer.setPadding(dp2px(16), dp2px(8), dp2px(16), dp2px(8));
+        mInfoContainer.setPadding(dp2px(20), dp2px(12), dp2px(20), dp2px(12));
 
         // Channel name and icon row
         LinearLayout channelRow = new LinearLayout(context);
         channelRow.setOrientation(LinearLayout.HORIZONTAL);
+        channelRow.setGravity(Gravity.CENTER_VERTICAL);
         channelRow.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp2px(30)));
+                dp2px(32)));
 
         mChannelNameView = new TextView(context);
         mChannelNameView.setTextColor(0xFFFFFFFF);
-        mChannelNameView.setTextSize(16);
+        mChannelNameView.setTextSize(18);
+        mChannelNameView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         mChannelNameView.setLayoutParams(new LinearLayout.LayoutParams(
                 0,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -70,8 +78,8 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         mCurrentProgramView = new TextView(context);
-        mCurrentProgramView.setTextColor(0xFFFFFFFF);
-        mCurrentProgramView.setTextSize(13);
+        mCurrentProgramView.setTextColor(0xFFE2E8F0);
+        mCurrentProgramView.setTextSize(14);
         mCurrentProgramView.setMaxLines(1);
         mCurrentProgramView.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -79,14 +87,17 @@ public class PlaybackInfoComponent extends FrameLayout implements IControlCompon
         programRow.addView(mCurrentProgramView);
 
         mProgressBar = new ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal);
-        mProgressBar.setLayoutParams(new LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams progParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dp2px(4)));
+                dp2px(5));
+        progParams.topMargin = dp2px(4);
+        progParams.bottomMargin = dp2px(4);
+        mProgressBar.setLayoutParams(progParams);
         mProgressBar.setProgressDrawable(context.getDrawable(R.drawable.progress_bar_accent));
         programRow.addView(mProgressBar);
 
         mNextProgramView = new TextView(context);
-        mNextProgramView.setTextColor(0xFF999999);
+        mNextProgramView.setTextColor(0xFF94A3B8);
         mNextProgramView.setTextSize(12);
         mNextProgramView.setMaxLines(1);
         mNextProgramView.setLayoutParams(new LinearLayout.LayoutParams(

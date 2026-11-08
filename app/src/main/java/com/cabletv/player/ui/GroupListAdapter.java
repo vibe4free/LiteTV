@@ -74,9 +74,11 @@ public class GroupListAdapter extends RecyclerView.Adapter<GroupListAdapter.Grou
         LinearLayout view = new LinearLayout(mContext);
         view.setOrientation(LinearLayout.HORIZONTAL);
         view.setGravity(Gravity.CENTER_VERTICAL);
-        view.setLayoutParams(new RecyclerView.LayoutParams(
+        RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
                 RecyclerView.LayoutParams.MATCH_PARENT,
-                dp2px(ChannelListComponent.GROUP_ROW_HEIGHT_DP)));
+                dp2px(ChannelListComponent.GROUP_ROW_HEIGHT_DP));
+        lp.setMargins(dp2px(6), dp2px(2), dp2px(6), dp2px(2));
+        view.setLayoutParams(lp);
         view.setPadding(dp2px(12), 0, dp2px(8), 0);
         return new GroupViewHolder(view);
     }
@@ -113,6 +115,7 @@ public class GroupListAdapter extends RecyclerView.Adapter<GroupListAdapter.Grou
             // The name may be shortened, the count may not: it is the number the viewer is
             // looking for, so it keeps its own space and never wraps.
             nameView = new TextView(itemView.getContext());
+            nameView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
             nameView.setSingleLine(true);
             nameView.setEllipsize(android.text.TextUtils.TruncateAt.END);
             itemView.addView(nameView, new LinearLayout.LayoutParams(
@@ -120,11 +123,12 @@ public class GroupListAdapter extends RecyclerView.Adapter<GroupListAdapter.Grou
 
             countView = new TextView(itemView.getContext());
             countView.setSingleLine(true);
-            countView.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            // Sized by its content: a fixed column would take the width the name needs, and
-            // "全部频道" would end up as "全部…".
-            countView.setPadding((int) (6 * itemView.getResources()
-                    .getDisplayMetrics().density + 0.5f), 0, 0, 0);
+            countView.setGravity(Gravity.CENTER);
+            countView.setTextSize(11);
+            countView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            int padH = (int) (8 * itemView.getResources().getDisplayMetrics().density + 0.5f);
+            int padV = (int) (2 * itemView.getResources().getDisplayMetrics().density + 0.5f);
+            countView.setPadding(padH, padV, padH, padV);
             itemView.addView(countView, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -132,28 +136,29 @@ public class GroupListAdapter extends RecyclerView.Adapter<GroupListAdapter.Grou
 
         void setGroup(String label, int channelCount, boolean isSelected, boolean focused) {
             nameView.setText(label);
-            countView.setText("(" + channelCount + ")");
+            countView.setText(String.valueOf(channelCount));
             int nameColor;
             int countColor;
             if (isSelected && focused) {
-                nameColor = 0xFFFF6B35;
-                countColor = 0xFFFF9966;
-                // The focused row keeps the same size: growing it was what pushed
-                // "★ 我的收藏" past the narrow column and into an ellipsis.
-                nameView.setTextSize(16);
-                countView.setTextSize(13);
+                nameColor = 0xFF00E5FF;
+                countColor = 0xFF00E5FF;
+                nameView.setTextSize(15);
+                countView.setTextSize(11);
+                countView.setBackgroundResource(R.drawable.bg_group_count_badge_focused);
                 container.setBackgroundResource(R.drawable.channel_item_selected_bg);
             } else if (isSelected) {
-                nameColor = 0xFFFF9966;
-                countColor = 0xFFFF9966;
-                nameView.setTextSize(16);
-                countView.setTextSize(12);
+                nameColor = 0xFF66E5FF;
+                countColor = 0xFF66E5FF;
+                nameView.setTextSize(15);
+                countView.setTextSize(11);
+                countView.setBackgroundResource(R.drawable.bg_group_count_badge);
                 container.setBackgroundResource(R.drawable.channel_item_selected_dim_bg);
             } else {
-                nameColor = 0xFFCCCCCC;
-                countColor = 0xFF8892A0;
-                nameView.setTextSize(16);
-                countView.setTextSize(12);
+                nameColor = 0xFFE2E8F0;
+                countColor = 0xFF94A3B8;
+                nameView.setTextSize(15);
+                countView.setTextSize(11);
+                countView.setBackgroundResource(R.drawable.bg_group_count_badge);
                 container.setBackgroundColor(0x00000000);
             }
             nameView.setTextColor(nameColor);

@@ -353,6 +353,7 @@ public class SettingsPanel extends android.widget.FrameLayout implements UpdateM
         mSidebarOpacityGroup.setOnCheckedChangeListener((group, checkedId) -> {
             AppConfig.setSidebarOpacity(opacityOf(checkedId));
             Toast.makeText(getContext(), R.string.sidebar_opacity_saved, Toast.LENGTH_SHORT).show();
+            mHost.onConfigurationChanged();
         });
         mEpgPreferenceGroup.setOnCheckedChangeListener((group, checkedId) -> {
             AppConfig.setEpgPreference(epgPreferenceOf(checkedId));

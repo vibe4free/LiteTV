@@ -38,6 +38,7 @@ import java.util.Locale;
 public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.ProgramViewHolder> {
     private final Context mContext;
     private final List<EpgManager.Program> mPrograms;
+    private Channel mChannel;
     private int mSelectedIndex = -1;
     private boolean mFocused = false;
     private RowClickCallback mRowClickCallback;
@@ -49,6 +50,11 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
         mScroller = scroller;
         mContext = context;
         mPrograms = new ArrayList<>(programs);
+    }
+
+    public void setChannel(Channel channel) {
+        mChannel = channel;
+        notifyDataSetChanged();
     }
 
     void setRowClickListener(RowClickCallback callback) {
@@ -85,17 +91,20 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
     public ProgramViewHolder onCreateViewHolder(@NonNull android.view.ViewGroup parent, int viewType) {
         LinearLayout view = new LinearLayout(mContext);
         view.setOrientation(LinearLayout.HORIZONTAL);
-        view.setLayoutParams(new RecyclerView.LayoutParams(
+        view.setGravity(Gravity.CENTER_VERTICAL);
+        RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(
                 RecyclerView.LayoutParams.MATCH_PARENT,
-                dp2px(ChannelListComponent.PROGRAM_ROW_HEIGHT_DP)));
-        view.setPadding(dp2px(12), dp2px(6), dp2px(12), dp2px(6));
+                dp2px(ChannelListComponent.PROGRAM_ROW_HEIGHT_DP));
+        lp.setMargins(dp2px(6), dp2px(2), dp2px(6), dp2px(2));
+        view.setLayoutParams(lp);
+        view.setPadding(dp2px(10), dp2px(4), dp2px(10), dp2px(4));
         return new ProgramViewHolder(view, mContext, mScroller);
     }
 
     @Override
     public void onBindViewHolder(@NonNull ProgramViewHolder holder, int position) {
         EpgManager.Program program = mPrograms.get(position);
-        holder.setProgram(program, position == mSelectedIndex, mFocused);
+        holder.setProgram(program, position == mSelectedIndex, mFocused, mChannel);
         holder.itemView.setOnClickListener(v -> {
             if (mRowClickCallback != null) {
                 mRowClickCallback.onRowClick(position);
@@ -117,6 +126,8 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
         private final LinearLayout container;
         private final TextView timeView;
         private final TextView titleView;
+        private final TextView liveBadgeView;
+        private final TextView catchupBadgeView;
         private final Context context;
 
         private final RowLabelScroller mLabelScroller;
@@ -126,30 +137,47 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
             mLabelScroller = scroller;
             this.context = context;
             this.container = itemView;
+            container.setGravity(Gravity.CENTER_VERTICAL);
 
             timeView = new TextView(context);
             timeView.setTextColor(ProgramViewHolder.TIME_NORMAL);
             timeView.setTextSize(12);
             timeView.setSingleLine(true);
             timeView.setLayoutParams(new LinearLayout.LayoutParams(
-                    // Wide enough for the longest stamp at this size ("23:23-23:36"); the column
-                    // is fixed so the titles of every row line up.
-                    dp2px(80),
+                    dp2px(78),
                     LinearLayout.LayoutParams.WRAP_CONTENT));
             container.addView(timeView);
 
             titleView = new TextView(context);
-            titleView.setTextColor(0xFFCCCCCC);
+            titleView.setTextColor(0xFFE2E8F0);
             titleView.setTextSize(14);
             titleView.setMaxLines(1);
             titleView.setLayoutParams(new LinearLayout.LayoutParams(
                     0,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     1.0f));
-            // Tighter than the leading gap used elsewhere: the time and the title belong
-            // together, and the column above already leaves a little slack of its own.
-            titleView.setPadding(dp2px(4), 0, 0, 0);
+            titleView.setPadding(dp2px(4), 0, dp2px(6), 0);
             container.addView(titleView);
+
+            liveBadgeView = new TextView(context);
+            liveBadgeView.setText("LIVE");
+            liveBadgeView.setTextColor(0xFF00E676);
+            liveBadgeView.setTextSize(10);
+            liveBadgeView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            liveBadgeView.setBackgroundResource(R.drawable.bg_badge_live);
+            liveBadgeView.setPadding(dp2px(6), dp2px(1), dp2px(6), dp2px(1));
+            liveBadgeView.setVisibility(View.GONE);
+            container.addView(liveBadgeView);
+
+            catchupBadgeView = new TextView(context);
+            catchupBadgeView.setText("回看 ↺");
+            catchupBadgeView.setTextColor(0xFFFF7A00);
+            catchupBadgeView.setTextSize(10);
+            catchupBadgeView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            catchupBadgeView.setBackgroundResource(R.drawable.bg_badge_catchup);
+            catchupBadgeView.setPadding(dp2px(6), dp2px(1), dp2px(6), dp2px(1));
+            catchupBadgeView.setVisibility(View.GONE);
+            container.addView(catchupBadgeView);
         }
 
         /** Whether this holder's title should be scrolling right now. */
@@ -162,6 +190,10 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
         }
 
         void setProgram(EpgManager.Program program, boolean isSelected, boolean focused) {
+            setProgram(program, isSelected, focused, null);
+        }
+
+        void setProgram(EpgManager.Program program, boolean isSelected, boolean focused, @Nullable Channel channel) {
             titleView.setText(program.title);
 
             // Format time display
@@ -174,27 +206,38 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
                 timeView.setText("");
             }
 
-            // A title that does not fit scrolls while this row is the highlighted one; every
-            // other row keeps the ellipsis.
+            // A title that does not fit scrolls while this row is the highlighted one
             applyTitleMarquee(isSelected && focused);
 
             // Highlight current/next program based on wall-clock time
             long currentTime = System.currentTimeMillis();
             boolean isCurrentProgram = currentTime >= program.startTime && currentTime < program.endTime;
+            boolean isPastProgram = program.endTime <= currentTime;
+
+            if (isCurrentProgram) {
+                liveBadgeView.setVisibility(View.VISIBLE);
+                catchupBadgeView.setVisibility(View.GONE);
+            } else if (isPastProgram && channel != null && channel.hasCatchup() && AppConfig.isCatchupBadgeEnabled()) {
+                liveBadgeView.setVisibility(View.GONE);
+                catchupBadgeView.setVisibility(View.VISIBLE);
+            } else {
+                liveBadgeView.setVisibility(View.GONE);
+                catchupBadgeView.setVisibility(View.GONE);
+            }
 
             // Apply cursor highlight if selected
             if (isSelected && focused) {
                 container.setBackgroundResource(R.drawable.channel_item_selected_bg);
                 titleView.setTextColor(0xFFFFFFFF);
                 container.animate()
-                        .scaleX(1.04f)
-                        .scaleY(1.04f)
+                        .scaleX(1.03f)
+                        .scaleY(1.03f)
                         .setDuration(150)
                         .start();
             } else if (isSelected && !focused) {
                 // Selected but focus not on program list
                 container.setBackgroundResource(R.drawable.channel_item_selected_dim_bg);
-                titleView.setTextColor(0xFFDDCCCC);
+                titleView.setTextColor(0xFF66E5FF);
                 container.animate()
                         .scaleX(1.0f)
                         .scaleY(1.0f)
@@ -202,7 +245,7 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
                         .start();
             } else {
                 container.setBackgroundColor(0x00000000);
-                titleView.setTextColor(0xFFCCCCCC);
+                titleView.setTextColor(0xFFE2E8F0);
                 container.animate()
                         .scaleX(1.0f)
                         .scaleY(1.0f)
@@ -210,16 +253,13 @@ public class ProgramListAdapter extends RecyclerView.Adapter<ProgramListAdapter.
                         .start();
             }
 
-            // The time is coloured on every bind, not only when the programme is current: rows
-            // come from a recycled pool, so a view that once showed the programme airing now
-            // would keep the highlight for whatever it is bound to next — which is how several
-            // rows in one guide ended up looking "current" at once.
+            // The time is coloured on every bind, not only when the programme is current
             timeView.setTextColor(isCurrentProgram ? TIME_CURRENT : TIME_NORMAL);
         }
 
         /** Colour of a time stamp: the programme on air is picked out; the rest stay quiet. */
-        static final int TIME_CURRENT = 0xFFFF9966;
-        static final int TIME_NORMAL = 0xFF888888;
+        static final int TIME_CURRENT = 0xFF00E5FF;
+        static final int TIME_NORMAL = 0xFF94A3B8;
 
         private int dp2px(int dp) {
             return Math.round(context.getResources().getDisplayMetrics().density * dp);

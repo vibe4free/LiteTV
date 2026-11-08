@@ -31,6 +31,9 @@
     <string name="playback_trying_backup">%1$s 无响应，正在尝试第 %2$d/%3$d 个源…</string>
     <string name="todays_programs">今日节目</string>
     <string name="yesterday_programs">昨日节目</string>
+    <string name="day_today">今日</string>
+    <string name="day_yesterday">昨日</string>
+    <string name="day_tomorrow">明日</string>
     <string name="no_epg_data">暂无节目单</string>
     <string name="next_program">下一个：%1$s</string>
     <string name="channel_number_unknown">无此频道</string>
@@ -105,7 +108,10 @@
     <string name="source_switched">%1$s · 第 %2$d/%3$d 个源</string>
     <string name="source_only_one">该频道只有一个源</string>
     <string name="timeshift_position">播放位置 %1$s</string>
-    <string name="timeshift_behind_live">距直播 %1$s</string>
+    <string name="timeshift_behind_live">慢于直播 -%1$s</string>
+    <string name="press_again_to_exit">再按一次返回键退出播放器</string>
+    <string name="playing_now">正在播放: %1$s</string>
+    <string name="live_indicator">● LIVE 直播</string>
     <string name="display_section">显示</string>
     <string name="catchup_badge">回放标记</string>
     <string name="catchup_badge_hint">回看时在画面角落显示一个小标记，提示当前不是直播。</string>

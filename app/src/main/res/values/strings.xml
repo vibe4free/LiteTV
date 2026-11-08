@@ -31,6 +31,9 @@
     <string name="playback_trying_backup">%1$s is not responding, trying source %2$d of %3$d…</string>
     <string name="todays_programs">Today\'s Programs</string>
     <string name="yesterday_programs">Yesterday\'s Programs</string>
+    <string name="day_today">Today</string>
+    <string name="day_yesterday">Yesterday</string>
+    <string name="day_tomorrow">Tomorrow</string>
     <string name="no_epg_data">No EPG data</string>
     <string name="next_program">Next: %1$s</string>
     <string name="channel_number_unknown">No such channel</string>
@@ -105,7 +108,10 @@
     <string name="source_switched">%1$s · source %2$d of %3$d</string>
     <string name="source_only_one">This channel has a single source</string>
     <string name="timeshift_position">Position %1$s</string>
-    <string name="timeshift_behind_live">Behind live %1$s</string>
+    <string name="timeshift_behind_live">Behind live -%1$s</string>
+    <string name="press_again_to_exit">Press BACK again to exit</string>
+    <string name="playing_now">Playing: %1$s</string>
+    <string name="live_indicator">● LIVE</string>
     <string name="display_section">Display</string>
     <string name="catchup_badge">Replay badge</string>
     <string name="catchup_badge_hint">Shows a small replay mark in the corner while you are watching a replay.</string>

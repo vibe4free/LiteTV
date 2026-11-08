@@ -2,146 +2,720 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiteTV 配置</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LiteTV 控制台 · 电视配置中心</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1e1e1e; color: #fff; margin: 0; padding: 20px; }
-        .container { max-width: 700px; margin: 0 auto; }
-        h1 { color: #FF6B35; margin-bottom: 30px; text-align: center; }
-        .section { background-color: #2a2a2a; border-left: 4px solid #FF6B35; border-radius: 4px; padding: 20px; margin-bottom: 20px; }
-        .section h2 { color: #FF6B35; margin-top: 0; font-size: 18px; }
-        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }
-        input[type="text"], input[type="url"], textarea { width: 100%; padding: 10px; margin-bottom: 12px; background-color: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
-        input[type="text"]:focus, input[type="url"]:focus, textarea:focus { outline: none; border-color: #FF6B35; }
-        button { background-color: #FF6B35; color: #fff; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; transition: background-color 0.3s; }
-        button:hover { background-color: #ff7d52; }
-        .info { font-size: 12px; color: #aaa; margin-top: 8px; line-height: 1.5; }
-        .status { padding: 10px; border-radius: 4px; margin-top: 8px; font-size: 12px; display: none; }
-        .status.success { background-color: #2d5a2d; color: #90EE90; display: block; }
-        .status.error { background-color: #5a2d2d; color: #FF6B6B; display: block; }
-        .status, .info { word-break: break-word; }
-
-        /* Selects and file pickers share the text fields' look. */
-        select.field, input.field { -webkit-appearance: none; appearance: none; }
-        .field { width: 100%; padding: 12px; margin-bottom: 10px; background-color: #1a1a1a; color: #fff;
-                 border: 1px solid #444; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
-
-        /* Phones: bigger targets, roomier text, nothing that needs a sideways scroll.
-           16px is also the threshold below which mobile Safari zooms the page in on focus. */
-        body { -webkit-text-size-adjust: 100%; }
-        input[type="text"], input[type="url"], textarea, select, button { font-size: 16px; }
-        button, select, input[type="text"], input[type="url"], input[type="file"], textarea {
-            min-height: 44px;
+        :root {
+            --bg-color: #0A0E17;
+            --card-bg: rgba(20, 27, 38, 0.85);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --card-hover-border: rgba(0, 229, 255, 0.35);
+            --accent-cyan: #00E5FF;
+            --accent-cyan-hover: #33EBFF;
+            --accent-cyan-dim: rgba(0, 229, 255, 0.12);
+            --accent-orange: #FF7A00;
+            --accent-green: #00E676;
+            --text-primary: #FFFFFF;
+            --text-secondary: #94A3B8;
+            --text-muted: #64748B;
+            --input-bg: #0C121B;
+            --input-border: #1E293B;
+            --radius-card: 16px;
+            --radius-btn: 10px;
+            --radius-pill: 24px;
         }
-        @media (max-width: 520px) {
-            body { padding: 12px; }
-            h1 { font-size: 20px; margin-bottom: 18px; }
-            .section { padding: 14px; margin-bottom: 14px; }
-            .section h2 { font-size: 16px; }
-            button { width: 100%; }
-            label { font-size: 15px; }
-            .info, .status { font-size: 13px; }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 15% 10%, rgba(0, 229, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(255, 122, 0, 0.04) 0%, transparent 40%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 32px 20px 60px;
+            -webkit-font-smoothing: antialiased;
+            -webkit-text-size-adjust: 100%;
+        }
+
+        .container {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+
+        /* Top Header */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 28px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .header-title-group {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .header-logo {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #00E5FF, #0088FF);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            box-shadow: 0 4px 16px rgba(0, 229, 255, 0.25);
+        }
+
+        .header-text h1 {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 8px;
+            background: var(--accent-cyan-dim);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            border-radius: 20px;
+            letter-spacing: 0.5px;
+        }
+
+        .header-subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        .device-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(14, 20, 30, 0.9);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-pill);
+            padding: 8px 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--accent-green);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--accent-green);
+            animation: pulseDot 2s infinite ease-in-out;
+        }
+
+        @keyframes pulseDot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+        }
+
+        /* Dashboard Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr; gap: 16px; }
+            body { padding: 16px 12px 40px; }
+            header { margin-bottom: 20px; }
+            .header-text h1 { font-size: 20px; }
+        }
+
+        /* Card Component */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius-card);
+            padding: 24px;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            transition: all 0.25s ease;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card:hover {
+            border-color: var(--card-hover-border);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 16px rgba(0, 229, 255, 0.06);
+        }
+
+        .card.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .card-header-icon {
+            font-size: 18px;
+        }
+
+        .card-header h2 {
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.2px;
+        }
+
+        /* Form Controls */
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        input[type="text"], input[type="url"], select.field {
+            width: 100%;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: var(--radius-btn);
+            padding: 12px 14px;
+            color: #FFFFFF;
+            font-size: 14px;
+            transition: all 0.2s ease;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        select.field {
+            background-image: url('data:image/svg+xml;utf8,<svg fill="%2394A3B8" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>');
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 36px;
+            cursor: pointer;
+        }
+
+        input[type="text"]:focus, input[type="url"]:focus, select.field:focus {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 0 3px rgba(0, 229, 255, 0.15);
+        }
+
+        /* Modern Toggle Switch */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            background: rgba(14, 20, 30, 0.6);
+            border: 1px solid var(--input-border);
+            border-radius: var(--radius-btn);
+            margin-bottom: 14px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .toggle-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            flex-shrink: 0;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #1E293B;
+            transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 2px;
+            bottom: 2px;
+            background-color: #94A3B8;
+            transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+            background-color: #0A0E17;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+
+        /* Buttons */
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: var(--accent-cyan);
+            color: #0A0E17;
+            padding: 11px 20px;
+            border: none;
+            border-radius: var(--radius-btn);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(0, 229, 255, 0.25);
+        }
+
+        button:hover {
+            background: var(--accent-cyan-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(0, 229, 255, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button.btn-secondary {
+            background: #1E293B;
+            color: #E2E8F0;
+            box-shadow: none;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        button.btn-secondary:hover {
+            background: #2D3B4F;
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #FFFFFF;
+        }
+
+        button.btn-danger {
+            background: rgba(239, 68, 68, 0.15);
+            color: #EF4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            box-shadow: none;
+        }
+
+        button.btn-danger:hover {
+            background: rgba(239, 68, 68, 0.25);
+        }
+
+        button.btn-orange {
+            background: linear-gradient(135deg, var(--accent-orange), #FF5252);
+            color: #FFFFFF;
+            box-shadow: 0 4px 14px rgba(255, 122, 0, 0.3);
+        }
+
+        button.btn-orange:hover {
+            box-shadow: 0 6px 18px rgba(255, 122, 0, 0.45);
+        }
+
+        /* Drag & Drop Upload Zone */
+        .drop-zone {
+            border: 2px dashed rgba(0, 229, 255, 0.3);
+            background: rgba(0, 229, 255, 0.02);
+            border-radius: var(--radius-card);
+            padding: 24px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            margin: 10px 0 14px;
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent-cyan);
+            background: rgba(0, 229, 255, 0.08);
+            transform: scale(1.005);
+        }
+
+        .drop-zone-icon {
+            font-size: 30px;
+            margin-bottom: 8px;
+            display: inline-block;
+        }
+
+        .drop-zone-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #E2E8F0;
+        }
+
+        .drop-zone-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        /* Info and Status Badges */
+        .info {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 10px;
+            line-height: 1.6;
+        }
+
+        .info-card {
+            background: rgba(14, 20, 30, 0.7);
+            border: 1px solid var(--input-border);
+            border-radius: var(--radius-btn);
+            padding: 12px 14px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        .info-card.active-epg {
+            border-left: 3px solid var(--accent-cyan);
+            color: #E2E8F0;
+        }
+
+        .status {
+            padding: 10px 14px;
+            border-radius: var(--radius-btn);
+            margin-top: 12px;
+            font-size: 13px;
+            font-weight: 500;
+            display: none;
+            animation: fadeIn 0.25s ease;
+            word-break: break-word;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .status.success {
+            background: rgba(0, 230, 118, 0.12);
+            color: #00E676;
+            border: 1px solid rgba(0, 230, 118, 0.3);
+            display: block;
+        }
+
+        .status.error {
+            background: rgba(239, 68, 68, 0.12);
+            color: #FF6B6B;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            display: block;
+        }
+
+        /* Update Log Box */
+        .changelog-box {
+            background: #090E16;
+            border: 1px solid var(--input-border);
+            border-radius: var(--radius-btn);
+            padding: 14px;
+            margin: 12px 0;
+            font-size: 12px;
+            line-height: 1.7;
+            color: #CBD5E1;
+            white-space: pre-line;
+            max-height: 160px;
+            overflow-y: auto;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📺 LiteTV 配置</h1>
-        
-        <div class="section">
-            <h2>M3U 播放列表</h2>
-            <label for="m3uUrl">播放列表 URL:</label>
-            <input type="url" id="m3uUrl" placeholder="http://example.com/playlist.m3u">
-            <div class="info">输入 M3U 播放列表的完整 URL，例如: http://example.com/playlist.m3u</div>
-            <button onclick="saveM3uUrl()">保存 M3U URL</button>
-            <div id="m3uStatus" class="status"></div>
-            <div id="m3uFileInfo" class="info"></div>
-            <div id="m3uDropDirInfo" class="info"></div>
-            <label for="m3uUploadInput" style="margin-top:12px;">从本机上传 M3U 文件（手机 / 电脑选择）:</label>
-            <input type="file" id="m3uUploadInput" accept=".m3u,.m3u8,.txt,text/plain" style="margin-bottom:12px;">
-            <button onclick="uploadM3uFile()">上传并启用</button>
-            <div id="uploadStatus" class="status"></div>
-            <button id="clearM3uFileBtn" onclick="clearM3uFile()" style="display:none;">清除本地文件</button>
-            <div id="m3uFileStatus" class="status"></div>
-            <label style="display:flex;align-items:center;gap:8px;margin:12px 0;">
-                <input type="checkbox" id="mergeSameName"> 合并同名频道（同一频道多个源合成一个）
-            </label>
-            <button onclick="saveChannels()">保存频道设置</button>
-            <div id="channelsStatus" class="status"></div>
-            <div class="info">订阅链接常把同一频道按不同源重复列出；开启后合并为一个频道并依次尝试各个源（播放界面按 R 或双击可手动切换源）。列表本身没有重复时无任何影响。</div>
-        </div>
-        
-        <div class="section">
-            <h2>EPG 电子节目单</h2>
-            <label for="epgUrl">EPG 地址模板:</label>
-            <input type="url" id="epgUrl" placeholder="http://epg.example.com/api/diyp?ch={name}&date={date}">
-            <div class="info">支持 {name} 和 {date} 占位符，例如: http://epg.example.com/api/diyp?ch={name}&date={date}</div>
-            <button onclick="saveEpgUrl()">保存 EPG 地址</button>
-            <div id="epgStatus" class="status"></div>
-            <label for="epgPreference" style="margin-top:16px;">EPG 来源优先级:</label>
-            <select id="epgPreference" class="field">
-                <option value="auto">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</option>
-                <option value="m3u">优先使用 M3U 内置 EPG</option>
-                <option value="user">仅使用我设置的 EPG</option>
-            </select>
-            <button onclick="saveEpgPreference()">保存优先级</button>
-            <div id="epgPrefStatus" class="status"></div>
-            <div id="epgM3uInfo" class="info"></div>
-            <div id="epgActiveInfo" class="info"></div>
-        </div>
-        
-        <div class="section">
-            <h2>播放与显示</h2>
-            <label for="videoRenderMode">画面输出方式:</label>
-            <select id="videoRenderMode" class="field">
-                <option value="surface">SurfaceView（推荐，画面更清晰）</option>
-                <option value="texture">TextureView（兼容备用）</option>
-            </select>
-            <label for="videoDecodeMode">解码方式:</label>
-            <select id="videoDecodeMode" class="field">
-                <option value="auto">自动（优先硬件，失败回退软件）</option>
-                <option value="hardware">仅硬件解码</option>
-                <option value="software">优先软件解码（可解决个别频道打不开）</option>
-            </select>
-            <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-                <input type="checkbox" id="videoTunneling"> 视频直通显示（实验，部分电视画面更流畅）
-            </label>
-            <label for="epgDisplay">频道列表显示节目单:</label>
-            <select id="epgDisplay" class="field">
-                <option value="1">显示</option>
-                <option value="0">不显示</option>
-            </select>
-            <label for="catchupBadge">回看时显示回放标记:</label>
-            <select id="catchupBadge" class="field">
-                <option value="1">显示（默认）</option>
-                <option value="0">不显示</option>
-            </select>
-            <label for="sidebarOpacity">频道列表背景:</label>
-            <select id="sidebarOpacity" class="field">
-                <option value="0">半透明（默认）</option>
-                <option value="1">半不透明</option>
-                <option value="2">不透明</option>
-            </select>
-            <button onclick="savePlayback()">保存播放设置</button>
-            <div id="playbackStatus" class="status"></div>
-            <div class="info">播放设置需重启电视端应用后生效；显示设置下次打开频道列表时生效。</div>
-        </div>
-        
-        <div class="section">
-            <h2>关于 / 更新</h2>
-            <div id="appVersionInfo" class="info"></div>
-            <label style="display:flex;align-items:center;gap:8px;margin:12px 0;">
-                <input type="checkbox" id="updateAutoCheck"> 自动检查更新（每天最多一次）
-            </label>
-            <div id="updateStateInfo" class="info"></div>
-            <div id="updateChangelog" class="info" style="white-space:pre-line;"></div>
-            <button onclick="checkUpdate()">检查更新</button>
-            <button onclick="installUpdate()" id="updateInstallBtn" style="margin-left:8px;">立即更新</button>
-            <div id="updateStatus" class="status"></div>
-            <div class="info">「立即更新」会让电视自动下载并校验安装包，然后在电视上弹出系统安装确认——安装需要有人在电视旁按确认。</div>
+        <!-- Top Navigation / Header -->
+        <header>
+            <div class="header-title-group">
+                <div class="header-logo">📺</div>
+                <div class="header-text">
+                    <h1>LiteTV 控制台 <span class="header-badge">REMOTE OS</span></h1>
+                    <div class="header-subtitle">局域网全功能配置 · 与电视端设置实时双向同步</div>
+                </div>
+            </div>
+            <div class="device-pill">
+                <div class="status-dot"></div>
+                <span id="deviceStatusText">电视已就绪</span>
+            </div>
+        </header>
+
+        <!-- Main Dashboard 2-Column Grid -->
+        <div class="dashboard-grid">
+            
+            <!-- CARD 1: M3U Playlist Management -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-header-icon">📋</span>
+                    <h2>M3U 播放列表管理</h2>
+                </div>
+
+                <div class="form-group">
+                    <label for="m3uUrl">订阅链接 (URL):</label>
+                    <input type="url" id="m3uUrl" placeholder="http://example.com/playlist.m3u">
+                    <div class="info">输入网络订阅 M3U / TXT 地址，电视端将在保存后自动重载</div>
+                    <div class="btn-group">
+                        <button onclick="saveM3uUrl()">保存并生效</button>
+                    </div>
+                    <div id="m3uStatus" class="status"></div>
+                </div>
+
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>本地 M3U 文件直接上传:</label>
+                    <div class="drop-zone" id="dropZone" onclick="document.getElementById('m3uUploadInput').click()">
+                        <div class="drop-zone-icon">☁️</div>
+                        <div class="drop-zone-title" id="dropZoneTitle">点击选择或将 M3U 文件拖拽至此处</div>
+                        <div class="drop-zone-hint">支持 .m3u, .m3u8, .txt 格式</div>
+                    </div>
+                    <input type="file" id="m3uUploadInput" accept=".m3u,.m3u8,.txt,text/plain" onchange="handleFileSelect(this)">
+                    
+                    <div class="btn-group">
+                        <button onclick="uploadM3uFile()">一键上传至电视</button>
+                        <button id="clearM3uFileBtn" class="btn-danger" onclick="clearM3uFile()" style="display:none;">清除本地文件</button>
+                    </div>
+                    <div id="uploadStatus" class="status"></div>
+                    <div id="m3uFileStatus" class="status"></div>
+                    
+                    <div id="m3uFileInfo" class="info-card"></div>
+                    <div id="m3uDropDirInfo" class="info" style="font-size:11px;"></div>
+                </div>
+
+                <div class="toggle-row" onclick="toggleCheckbox('mergeSameName', event)">
+                    <div class="toggle-text">
+                        <span class="toggle-title">智能合并同名频道</span>
+                        <span class="info" style="margin:0; font-size:11px;">同一频道多个源自动聚合为一条，故障自动倒换</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="mergeSameName">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="btn-group">
+                    <button class="btn-secondary" onclick="saveChannels()">保存频道合并设置</button>
+                </div>
+                <div id="channelsStatus" class="status"></div>
+            </div>
+
+            <!-- CARD 2: EPG Electronic Program Guide -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-header-icon">🗓️</span>
+                    <h2>EPG 电子节目单 &amp; 回看</h2>
+                </div>
+
+                <div class="form-group">
+                    <label for="epgUrl">EPG 接口地址模板:</label>
+                    <input type="url" id="epgUrl" placeholder="http://epg.example.com/api/diyp?ch={name}&amp;date={date}">
+                    <div class="info">支持 DIYP 格式及 XMLTV 压缩包 (gzip/zip)，支持 {name} / {date} 占位符</div>
+                    <div class="btn-group">
+                        <button onclick="saveEpgUrl()">保存 EPG 地址</button>
+                    </div>
+                    <div id="epgStatus" class="status"></div>
+                </div>
+
+                <div class="form-group" style="margin-top: 18px;">
+                    <label for="epgPreference">EPG 来源仲裁优先级:</label>
+                    <select id="epgPreference" class="field">
+                        <option value="auto">自动：优先使用我设置的 EPG，未设置时用 M3U 内置</option>
+                        <option value="m3u">优先使用 M3U 头部内置 EPG (x-tvg-url)</option>
+                        <option value="user">仅使用我设置的自定义 EPG</option>
+                    </select>
+                    <div class="btn-group">
+                        <button onclick="saveEpgPreference()">保存优先级</button>
+                    </div>
+                    <div id="epgPrefStatus" class="status"></div>
+                </div>
+
+                <div id="epgActiveInfo" class="info-card active-epg"></div>
+                <div id="epgM3uInfo" class="info-card"></div>
+            </div>
+
+            <!-- CARD 3: Playback Engine & Display Settings -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-header-icon">⚡</span>
+                    <h2>播放核心与视听输出</h2>
+                </div>
+
+                <div class="form-group">
+                    <label for="videoRenderMode">画面渲染方式:</label>
+                    <select id="videoRenderMode" class="field">
+                        <option value="surface">SurfaceView (推荐 · 硬件直通层，画面无撕裂更清晰)</option>
+                        <option value="texture">TextureView (兼容备用模式)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="videoDecodeMode">解码策略:</label>
+                    <select id="videoDecodeMode" class="field">
+                        <option value="auto">自动 (优先硬件加速，失败平滑倒换软解)</option>
+                        <option value="hardware">仅硬件解码</option>
+                        <option value="software">优先软件解码 (针对特殊编码源)</option>
+                    </select>
+                </div>
+
+                <div class="toggle-row" onclick="toggleCheckbox('videoTunneling', event)">
+                    <div class="toggle-text">
+                        <span class="toggle-title">视频直通显示 (Tunneling)</span>
+                        <span class="info" style="margin:0; font-size:11px;">针对支持芯片降低音画同步抖动</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="videoTunneling">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label for="sidebarOpacity">电视端频道侧边栏背景风格:</label>
+                    <select id="sidebarOpacity" class="field">
+                        <option value="0">半透明深黑 (默认 Modern 悬浮)</option>
+                        <option value="1">半不透明</option>
+                        <option value="2">深曜石黑全不透明 (高对比度)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="epgDisplay">三栏列表展开时显示右侧节目单:</label>
+                    <select id="epgDisplay" class="field">
+                        <option value="1">显示 (完整三栏)</option>
+                        <option value="0">隐藏 (双栏精简)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="catchupBadge">节目单与回看标记徽章:</label>
+                    <select id="catchupBadge" class="field">
+                        <option value="1">显示「回看 ↺」徽标</option>
+                        <option value="0">不显示</option>
+                    </select>
+                </div>
+
+                <div class="btn-group">
+                    <button onclick="savePlayback()">保存播放与显示设置</button>
+                </div>
+                <div id="playbackStatus" class="status"></div>
+                <div class="info">※ 渲染与解码修改后需在电视端重启 LiteTV 生效；界面样式下次呼出立即生效。</div>
+            </div>
+
+            <!-- CARD 4: System & OTA Update Management -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-header-icon">🚀</span>
+                    <h2>系统状态与在线更新 (OTA)</h2>
+                </div>
+
+                <div id="appVersionInfo" class="info-card"></div>
+                
+                <div class="toggle-row" onclick="toggleCheckbox('updateAutoCheck', event)" style="margin-top:14px;">
+                    <div class="toggle-text">
+                        <span class="toggle-title">自动检查版本更新</span>
+                        <span class="info" style="margin:0; font-size:11px;">每天静默检测 GitHub Releases 固定 update.json</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="updateAutoCheck">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div id="updateStateInfo" class="info-card" style="font-weight:600; color:var(--accent-cyan);"></div>
+                <div id="updateChangelog" class="changelog-box" style="display:none;"></div>
+
+                <div class="btn-group" style="margin-top: 14px;">
+                    <button class="btn-secondary" onclick="checkUpdate()">检查最新版本</button>
+                    <button class="btn-orange" onclick="installUpdate()" id="updateInstallBtn">向电视推送更新安装</button>
+                </div>
+                <div id="updateStatus" class="status"></div>
+                <div class="info">推送更新后，电视将自动进行 SHA256 与证书签名四重校验，并在电视上呼出系统确认窗口。</div>
+            </div>
+
         </div>
     </div>
+
     <script>
+        // Checkbox row click helper
+        function toggleCheckbox(id, e) {
+            if (e.target.tagName === 'INPUT' || e.target.classList.contains('slider')) return;
+            const cb = document.getElementById(id);
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event('change'));
+        }
+
+        // Drag & Drop UX
+        const dropZone = document.getElementById('dropZone');
+        ['dragenter', 'dragover'].forEach(name => {
+            dropZone.addEventListener(name, (e) => { e.preventDefault(); dropZone.classList.add('dragover'); }, false);
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            dropZone.addEventListener(name, (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); }, false);
+        });
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files && files.length) {
+                document.getElementById('m3uUploadInput').files = files;
+                handleFileSelect(document.getElementById('m3uUploadInput'));
+            }
+        });
+
+        function handleFileSelect(input) {
+            if (input.files && input.files[0]) {
+                document.getElementById('dropZoneTitle').textContent = '已选择: ' + input.files[0].name;
+            }
+        }
+
         function saveM3uUrl() {
             const url = document.getElementById('m3uUrl').value.trim();
             if (!url) { alert('请输入 M3U URL'); return; }
@@ -163,6 +737,7 @@
                 document.getElementById('m3uStatus').textContent = '✗ 网络错误: ' + e;
             });
         }
+
         function saveEpgUrl() {
             const url = document.getElementById('epgUrl').value.trim();
             if (!url) { alert('请输入 EPG 地址'); return; }
@@ -184,6 +759,7 @@
                 document.getElementById('epgStatus').textContent = '✗ 网络错误: ' + e;
             });
         }
+
         function saveEpgPreference() {
             const pref = document.getElementById('epgPreference').value;
             fetch('/config/epg-preference', {
@@ -204,6 +780,7 @@
                 document.getElementById('epgPrefStatus').textContent = '✗ 网络错误: ' + e;
             });
         }
+
         function clearM3uFile() {
             fetch('/config/m3u-file-clear', {
                 method: 'POST',
@@ -216,6 +793,7 @@
                     status.textContent = '✓ ' + d.message + ' (TV 端将自动重新加载)';
                     document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';
                     document.getElementById('clearM3uFileBtn').style.display = 'none';
+                    document.getElementById('dropZoneTitle').textContent = '点击选择或将 M3U 文件拖拽至此处';
                 } else {
                     status.className = 'status error';
                     status.textContent = '✗ ' + d.message;
@@ -225,12 +803,13 @@
                 document.getElementById('m3uFileStatus').textContent = '✗ 网络错误: ' + e;
             });
         }
+
         function uploadM3uFile() {
             const input = document.getElementById('m3uUploadInput');
-            if (!input.files || !input.files.length) { alert('请先选择文件'); return; }
+            if (!input.files || !input.files.length) { alert('请先选择或拖拽 M3U 文件'); return; }
             const status = document.getElementById('uploadStatus');
             status.className = 'status';
-            status.textContent = '上传中…';
+            status.textContent = '正在上传至电视…';
             status.style.display = 'block';
             const form = new FormData();
             form.append('file', input.files[0]);
@@ -240,13 +819,14 @@
                     status.textContent = (d.success ? '✓ ' : '✗ ') + d.message + (d.success ? '（电视端已重新加载）' : '');
                     if (d.success) {
                         document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + input.files[0].name;
-                        document.getElementById('clearM3uFileBtn').style.display = 'block';
+                        document.getElementById('clearM3uFileBtn').style.display = 'inline-flex';
                     }
                 }).catch(e => {
                     status.className = 'status error';
                     status.textContent = '✗ 上传失败: ' + e;
                 });
         }
+
         function saveChannels() {
             const body = 'merge_same_name_channels=' + (document.getElementById('mergeSameName').checked ? '1' : '0');
             fetch('/config/channels', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})
@@ -259,10 +839,8 @@
                     status.textContent = '✗ 网络错误: ' + e;
                 });
         }
+
         function savePlayback() {
-            // Each endpoint gets only its own fields. Sending everything to both worked by
-            // accident (unknown keys were ignored) and hid mistakes: a renamed field simply
-            // stopped being saved, with no error anywhere.
             const playback = 'video_render_mode=' + encodeURIComponent(document.getElementById('videoRenderMode').value)
                 + '&video_decode_mode=' + encodeURIComponent(document.getElementById('videoDecodeMode').value)
                 + '&video_tunneling=' + (document.getElementById('videoTunneling').checked ? '1' : '0');
@@ -282,6 +860,7 @@
                 document.getElementById('playbackStatus').textContent = '✗ 网络错误: ' + e;
             });
         }
+
         function saveUpdateSettings() {
             const body = 'update_auto_check=' + (document.getElementById('updateAutoCheck').checked ? '1' : '0');
             fetch('/config/update-settings', {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body})
@@ -291,30 +870,38 @@
                     status.textContent = (d.success ? '✓ ' : '✗ ') + d.message;
                 }).catch(e => console.error('保存更新设置失败:', e));
         }
+
         function updateStateText(d) {
             const state = d.update_state || '';
             if (state === 'checking') return '正在检查更新…';
-            if (state === 'up_to_date') return '已是最新版本';
-            if (state === 'update_available') return '发现新版本 ' + (d.update_latest_version || '');
-            if (state === 'downloading') return '电视正在下载… ' + (d.update_progress || 0) + '%';
-            if (state === 'ready') return '已下载并校验通过，等待在电视上确认安装';
+            if (state === 'up_to_date') return '✓ 已是最新版本';
+            if (state === 'update_available') return '✨ 发现新版本 ' + (d.update_latest_version || '');
+            if (state === 'downloading') return '电视正在下载安装包… ' + (d.update_progress || 0) + '%';
+            if (state === 'ready') return '✓ 已下载并校验通过，等待在电视上确认安装';
             if (state === 'installing') return '等待电视上的安装确认…';
             if (state === 'needs_permission') return '电视需要先允许 LiteTV 安装更新（请在电视上打开设置）';
             if (state === 'error') return '检查失败：' + updateErrorText(d.update_error);
             return '尚未检查';
         }
+
         function updateErrorText(code) {
             const errors = {NETWORK: '网络不可用', HTTP: '服务器错误', HTTP_NOT_FOUND: '该版本尚未发布更新信息', PARSE: '更新信息格式不可用', NO_BUILD_FOR_DEVICE: '没有适配电视 CPU 的安装包', CHECKSUM: '安装包校验失败，已删除', SIGNATURE: '安装包签名与应用不一致，已拒绝', STORAGE: '存储空间异常', INSTALL_BLOCKED: '系统阻止安装，需在电视上允许', INSTALL_FAILED: '安装失败', CANCELLED: '已取消下载', UNKNOWN: '未知错误'};
             return errors[code] || code || '未知错误';
         }
+
         function renderUpdate(d) {
-            document.getElementById('appVersionInfo').textContent = '电视端版本: LiteTV ' + (d.app_version_name || '?') + ' (' + (d.app_version_code || 0) + ')' + (d.update_last_check_ms ? '，上次检查 ' + new Date(d.update_last_check_ms).toLocaleString() : '，从未检查');
+            document.getElementById('appVersionInfo').textContent = '电视端当前版本: LiteTV ' + (d.app_version_name || '?') + ' (' + (d.app_version_code || 0) + ')' + (d.update_last_check_ms ? ' · 上次检查: ' + new Date(d.update_last_check_ms).toLocaleString() : ' · 从未检查');
             document.getElementById('updateStateInfo').textContent = updateStateText(d);
             const changelog = d.update_changelog || [];
-            document.getElementById('updateChangelog').textContent = changelog.length ? ('更新内容：\
-· ' + changelog.join('\
-· ')) : '';
+            const clBox = document.getElementById('updateChangelog');
+            if (changelog.length) {
+                clBox.textContent = '更新内容：\n· ' + changelog.join('\n· ');
+                clBox.style.display = 'block';
+            } else {
+                clBox.style.display = 'none';
+            }
         }
+
         function checkUpdate() {
             const status = document.getElementById('updateStatus');
             status.className = 'status success';
@@ -329,6 +916,7 @@
                     status.textContent = '✗ 无法让电视检查更新: ' + e;
                 });
         }
+
         function installUpdate() {
             const status = document.getElementById('updateStatus');
             if (!confirm('将在电视上下载并校验安装包，然后需要有人在电视上确认安装。继续？')) return;
@@ -347,6 +935,7 @@
                     status.textContent = '✗ 无法触发更新: ' + e;
                 });
         }
+
         function pollUpdate(attempt) {
             if (attempt > 40) return;
             fetch('/config/get').then(r => r.json()).then(d => {
@@ -360,6 +949,7 @@
                 }
             }).catch(e => console.error('轮询更新状态失败:', e));
         }
+
         window.onload = function() {
             fetch('/config/get').then(r => r.json()).then(d => {
                 document.getElementById('m3uUrl').value = d.m3u_url || '';
@@ -374,18 +964,18 @@
                 const m3uFile = d.m3u_file_path || '';
                 const dropDir = d.m3u_drop_dir || '';
                 if (dropDir) {
-                    document.getElementById('m3uDropDirInfo').textContent = '也可把 .m3u 文件放到电视上：' + dropDir + '，再在电视设置里点「从文件夹导入」';
+                    document.getElementById('m3uDropDirInfo').textContent = '也可把 .m3u 文件放到电视专属目录：' + dropDir + '，再在电视设置里点「从文件夹导入」';
                 }
                 if (m3uFile) {
-                    document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件生效: ' + m3uFile;
-                    document.getElementById('clearM3uFileBtn').style.display = 'block';
+                    document.getElementById('m3uFileInfo').textContent = '本地 M3U 文件已生效: ' + m3uFile;
+                    document.getElementById('clearM3uFileBtn').style.display = 'inline-flex';
                 } else {
-                    document.getElementById('m3uFileInfo').textContent = '未使用本地文件，使用上方 M3U 地址';
+                    document.getElementById('m3uFileInfo').textContent = '当前未使用本地文件，使用网络订阅 M3U';
                 }
                 const m3uUrls = d.m3u_epg_urls || [];
                 document.getElementById('epgM3uInfo').textContent = m3uUrls.length
-                    ? 'M3U 内置 EPG: ' + m3uUrls.join(' | ')
-                    : '当前 M3U 未提供内置 EPG';
+                    ? 'M3U 头部声明 EPG: ' + m3uUrls.join(' | ')
+                    : '当前 M3U 未声明内置 EPG 地址';
                 const active = d.active_epg_url || '';
                 document.getElementById('epgActiveInfo').textContent = active
                     ? '当前生效 EPG: ' + active
@@ -393,7 +983,10 @@
                 document.getElementById('mergeSameName').checked = d.merge_same_name_channels !== false;
                 document.getElementById('updateAutoCheck').checked = d.update_auto_check !== false;
                 renderUpdate(d);
-            }).catch(e => console.error('加载配置失败:', e));
+            }).catch(e => {
+                console.error('加载配置失败:', e);
+                document.getElementById('deviceStatusText').textContent = '连接中断或未响应';
+            });
         };
         document.getElementById('updateAutoCheck').addEventListener('change', saveUpdateSettings);
     </script>

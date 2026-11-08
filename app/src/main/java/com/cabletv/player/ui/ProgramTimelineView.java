@@ -81,11 +81,11 @@ public class ProgramTimelineView extends View {
 
     public ProgramTimelineView(@NonNull Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
-        mTrackPaint.setColor(Color.parseColor("#1E293B"));
-        mSegmentPaint.setColor(Color.parseColor("#263449"));
-        mCurrentPaint.setColor(Color.parseColor("#FF6B35"));
+        mTrackPaint.setColor(Color.parseColor("#141D2B"));
+        mSegmentPaint.setColor(Color.parseColor("#1E2B3E"));
+        mCurrentPaint.setColor(Color.parseColor("#00E5FF"));
         mPlayheadPaint.setColor(Color.WHITE);
-        mLivePaint.setColor(Color.parseColor("#FF9966"));
+        mLivePaint.setColor(Color.parseColor("#FF7A00"));
         setClickable(true);
     }
 
@@ -225,7 +225,7 @@ public class ProgramTimelineView extends View {
         float top = (height - trackHeight) / 2f;
         float gap = dp2px(SEGMENT_GAP_DP);
 
-        // The empty track: what the viewer sees when the guide has nothing to say.
+        // The empty track
         mRect.set(0, top, width, top + trackHeight);
         canvas.drawRoundRect(mRect, trackHeight / 2f, trackHeight / 2f, mTrackPaint);
 
@@ -234,29 +234,21 @@ public class ProgramTimelineView extends View {
             return;
         }
 
-        // The programmes, each in its own piece of the track.
-        for (Segment segment : mSegments) {
-            float start = xFor(segment.startTime, span, width);
-            float end = xFor(segment.endTime, span, width);
-            if (end <= start) {
-                // Too short to draw: give it a sliver so it is not lost.
-                end = start + 1f;
+        // Played portion from 0 to headX
+        float headX = Math.max(0, Math.min(width, xFor(mPositionMs, span, width)));
+        if (headX > 0) {
+            mRect.set(0, top, headX, top + trackHeight);
+            canvas.drawRoundRect(mRect, trackHeight / 2f, trackHeight / 2f, mCurrentPaint);
+        }
+
+        // Segment dividers if multiple segments exist
+        if (mSegments.size() > 1) {
+            for (Segment segment : mSegments) {
+                float segEnd = xFor(segment.endTime, span, width);
+                if (segEnd > 0 && segEnd < width) {
+                    canvas.drawLine(segEnd, top, segEnd, top + trackHeight, mTrackPaint);
+                }
             }
-            if (start > width) {
-                break;
-            }
-            if (end < 0) {
-                continue;
-            }
-            mRect.set(Math.max(0, start), top, Math.min(width, end - gap),
-                    top + trackHeight);
-            if (mRect.right <= mRect.left) {
-                continue;
-            }
-            // Inclusive at the end: live playback parks the playhead on the window end.
-            boolean current = mPositionMs >= segment.startTime && mPositionMs <= segment.endTime;
-            canvas.drawRoundRect(mRect, trackHeight / 2f, trackHeight / 2f,
-                    current ? mCurrentPaint : mSegmentPaint);
         }
 
         // The live edge: a bright line at the end of the track, so it is clear where "now" is.
@@ -266,12 +258,13 @@ public class ProgramTimelineView extends View {
             canvas.drawRect(mRect, mLivePaint);
         }
 
-        // The playhead.
-        float headX = xFor(mPositionMs, span, width);
-        float headWidth = dp2px(PLAYHEAD_WIDTH_DP);
-        mRect.set(headX - headWidth / 2f, top - dp2px(4),
-                headX + headWidth / 2f, top + trackHeight + dp2px(4));
-        canvas.drawRoundRect(mRect, headWidth / 2f, headWidth / 2f, mPlayheadPaint);
+        // The playhead thumb: modern circular marker with cyan outer glow and white center
+        float thumbRadius = dp2px(5.5f);
+        float centerY = top + trackHeight / 2f;
+        mPlayheadPaint.setColor(Color.parseColor("#00E5FF"));
+        canvas.drawCircle(headX, centerY, thumbRadius, mPlayheadPaint);
+        mPlayheadPaint.setColor(Color.WHITE);
+        canvas.drawCircle(headX, centerY, dp2px(2.5f), mPlayheadPaint);
     }
 
     private float xFor(long timeMs, long span, int width) {
