@@ -143,6 +143,10 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         groupSection.addView(groupTitle);
 
         mGroupRecyclerView = new RecyclerView(context);
+        // No item animator: switching channels rebuilds the programme column, and the default
+        // fade made the rows blink out and back in every time the viewer stepped through the
+        // list. The columns are a live view of the guide, not a place for transitions.
+        mGroupRecyclerView.setItemAnimator(null);
         mGroupRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
         mGroupRecyclerView.setLayoutManager(new CenteringLayoutManager(context));
         mGroupRecyclerView.setBackgroundColor(0x00000000);
@@ -172,6 +176,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         channelSection.addView(mTitleView);
 
         mRecyclerView = new RecyclerView(context);
+        mRecyclerView.setItemAnimator(null);
         mRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
         mRecyclerView.setLayoutManager(new CenteringLayoutManager(context));
         mRecyclerView.setBackgroundColor(0x00000000);
@@ -236,6 +241,7 @@ public class ChannelListComponent extends FrameLayout implements IControlCompone
         mProgramListContainer.addView(dateTabsBar);
 
         mProgramRecyclerView = new RecyclerView(context);
+        mProgramRecyclerView.setItemAnimator(null);
         mProgramRecyclerView.setLayoutParams(new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f));
         mProgramRecyclerView.setLayoutManager(new CenteringLayoutManager(context));
         mProgramRecyclerView.setBackgroundColor(0x00000000);
