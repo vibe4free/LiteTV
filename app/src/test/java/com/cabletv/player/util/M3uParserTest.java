@@ -2,6 +2,7 @@ package com.cabletv.player.util;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.cabletv.player.model.Channel;
@@ -39,6 +40,39 @@ public class M3uParserTest {
      * VLC puts its options above the entry they belong to; they used to be dropped there because
      * no channel existed yet, and the source then failed on a server that wants a user agent.
      */
+    /**
+     * The address a browser shows for a file on a code host is a page about that file. Copying it
+     * is the obvious thing to do, and the result was "could not be parsed" with nothing else.
+     */
+    @Test
+    public void aWebPageAddressIsTurnedIntoTheFileAddress() {
+        assertEquals("https://raw.githubusercontent.com/some-owner/some-repo/master/list.m3u",
+                M3uParser.normalizePlaylistUrl(
+                        "https://github.com/some-owner/some-repo/blob/master/list.m3u"));
+        assertEquals("https://raw.githubusercontent.com/some-owner/some-repo/main/sub/list.m3u8",
+                M3uParser.normalizePlaylistUrl(
+                        "https://github.com/some-owner/some-repo/blob/main/sub/list.m3u8"));
+    }
+
+    @Test
+    public void ordinaryAddressesAreLeftAlone() {
+        String direct = "http://192.168.1.10:5140/playlist.m3u";
+        assertEquals(direct, M3uParser.normalizePlaylistUrl(direct));
+        String raw = "https://raw.githubusercontent.com/o/r/master/list.m3u";
+        assertEquals(raw, M3uParser.normalizePlaylistUrl(raw));
+        assertEquals("surrounding spaces are trimmed",
+                direct, M3uParser.normalizePlaylistUrl("  " + direct + "  "));
+    }
+
+    @Test
+    public void aPageIsRecognisedSoTheFailureCanBeExplained() {
+        assertTrue(M3uParser.looksLikeWebPage("<!DOCTYPE html>\n<html lang=\"en\">"));
+        assertTrue(M3uParser.looksLikeWebPage("\n\n  <html><head></head></html>"));
+        assertFalse(M3uParser.looksLikeWebPage("#EXTM3U\n#EXTINF:-1,A\nhttp://s/1\n"));
+        assertFalse(M3uParser.looksLikeWebPage(""));
+        assertFalse(M3uParser.looksLikeWebPage(null));
+    }
+
     @Test
     public void vlcOptionsBeforeTheEntryBelongToThatEntry() {
         String playlist = "#EXTM3U\n"

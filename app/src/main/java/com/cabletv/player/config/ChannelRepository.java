@@ -118,11 +118,17 @@ public class ChannelRepository {
                 failure = "Cannot read " + m3uFilePath;
             }
         } else if (!TextUtils.isEmpty(m3uUrl)) {
+            // A copied browser address points at a page showing the file, not the file: download
+            // it and the playlist parses to nothing. Correct it before fetching.
+            String downloadUrl = M3uParser.normalizePlaylistUrl(m3uUrl);
+            if (!downloadUrl.equals(m3uUrl)) {
+                Log.i(TAG, "Playlist address corrected for download: " + downloadUrl);
+            }
             try {
-                content = loadFromUrl(m3uUrl);
+                content = loadFromUrl(downloadUrl);
                 fromNetwork = true;
             } catch (Exception e) {
-                Log.e(TAG, "Error loading URL: " + m3uUrl, e);
+                Log.e(TAG, "Error loading URL: " + downloadUrl, e);
                 failure = describe(e);
             }
         } else {
@@ -137,7 +143,8 @@ public class ChannelRepository {
             // Whatever we are about to show, its header is the truth for "EPG embedded in the
             // playlist": keep it in sync so the EPG manager can fall back to it. The base URL
             // is only meaningful for a URL-loaded playlist, which is what relative paths imply.
-            AppConfig.setM3uEpgUrls(M3uParser.parseEpgUrls(content, m3uUrl));
+            AppConfig.setM3uEpgUrls(M3uParser.parseEpgUrls(content,
+                    M3uParser.normalizePlaylistUrl(m3uUrl)));
             if (fromNetwork) {
                 saveToCache(content);
             }
@@ -145,7 +152,9 @@ public class ChannelRepository {
             return;
         }
         if (failure == null) {
-            failure = "Playlist is empty or could not be parsed";
+            failure = M3uParser.looksLikeWebPage(content)
+                    ? "The address returned a web page, not a playlist"
+                    : "Playlist is empty or could not be parsed";
         }
 
         // Network or parsing failed: fall back to the last playlist that did work.
@@ -205,6 +214,13 @@ public class ChannelRepository {
             connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
             connection.setReadTimeout(READ_TIMEOUT_MS);
             connection.setInstanceFollowRedirects(true);
+            if (connection instanceof javax.net.ssl.HttpsURLConnection) {
+                // The updater and the guide already extend the trust store for old Android
+                // releases; a playlist served from a modern host needs the same treatment, or the
+                // download fails on a certificate the device has never heard of.
+                com.cabletv.player.util.TlsCompat.applyTo(
+                        (javax.net.ssl.HttpsURLConnection) connection);
+            }
             int code = connection.getResponseCode();
             if (code != HttpURLConnection.HTTP_OK) {
                 throw new IOException("HTTP " + code);

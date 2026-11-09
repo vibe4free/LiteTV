@@ -170,6 +170,49 @@ public class M3uParser {
         return urls;
     }
 
+    /**
+     * Turns a browser address into the address that actually serves the file.
+     *
+     * <p>People copy the address they see in the browser, which for a file hosted on a code host
+     * is a page showing that file rather than the file itself. Downloading the page yields HTML,
+     * the playlist parses to nothing, and the only thing the viewer sees is "could not be
+     * parsed". The mapping is mechanical, so it happens here instead of asking the viewer to
+     * know it.
+     *
+     * @return the address to download, or the input unchanged when it is not a page address
+     */
+    public static String normalizePlaylistUrl(String url) {
+        if (url == null) {
+            return null;
+        }
+        String trimmed = url.trim();
+        java.util.regex.Matcher matcher = WEB_FILE_PAGE.matcher(trimmed);
+        if (matcher.matches()) {
+            return "https://raw.githubusercontent.com/" + matcher.group(1) + "/"
+                    + matcher.group(2) + "/" + matcher.group(3);
+        }
+        return trimmed;
+    }
+
+    /** <code>host/&lt;owner&gt;/&lt;repo&gt;/blob/&lt;ref&gt;/&lt;path&gt;</code>: the page a browser shows for a file. */
+    private static final java.util.regex.Pattern WEB_FILE_PAGE =
+            java.util.regex.Pattern.compile(
+                    "(?i)^https?://(?:www\\.)?github\\.com/([^/]+)/([^/]+)/blob/(.+)$");
+
+    /**
+     * True when the body looks like a web page rather than a playlist.
+     *
+     * <p>Lets the player say what actually went wrong instead of a generic parse failure.
+     */
+    public static boolean looksLikeWebPage(String content) {
+        if (content == null) {
+            return false;
+        }
+        String head = content.length() > 600 ? content.substring(0, 600) : content;
+        String lower = head.toLowerCase(java.util.Locale.US).trim();
+        return lower.startsWith("<!doctype html") || lower.startsWith("<html");
+    }
+
     /** @return an http(s) EPG URL, or null when the value is unusable. */
     private static String resolveEpgUrl(String value, String playlistUrl) {
         // Trailing punctuation survives splitting in some generated playlists and would break the
