@@ -63,6 +63,14 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
     protected String currentPlayPath;
     protected Map<String, String> currentHeaders;
     private boolean mRetriedAsHls;
+    /**
+     * Set once a source has been retried as a progressive stream.
+     *
+     * <p>Some servers answer a .m3u8 address with a redirect to a plain stream. The address says
+     * HLS, so the player asks the HLS parser, which refuses the body ("does not start with the
+     * #EXTM3U header") and the channel looks dead even though the stream itself is fine.
+     */
+    private boolean mRetriedAsProgressive;
 
     public ExoMediaPlayer(Context context) {
         mAppContext = context.getApplicationContext();
@@ -228,6 +236,7 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
         currentPlayPath = path;
         currentHeaders = copyHeaders(headers);
         mRetriedAsHls = false;
+        mRetriedAsProgressive = false;
         mMediaSource = mMediaSourceHelper.getMediaSource(path, copyHeaders(currentHeaders));
     }
 
@@ -281,6 +290,7 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
         currentPlayPath = path;
         currentHeaders = copyHeaders(headers);
         mRetriedAsHls = false;
+        mRetriedAsProgressive = false;
         mMediaSource = mMediaSourceHelper.getMediaSource(path, copyHeaders(currentHeaders));
         if (mMediaSource != null) {
             mInternalPlayer.setMediaSource(mMediaSource);
@@ -296,6 +306,7 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
             mInternalPlayer.setVideoSurface(null);
             mIsPreparing = false;
             mRetriedAsHls = false;
+        mRetriedAsProgressive = false;
         }
     }
 
@@ -434,12 +445,45 @@ public class ExoMediaPlayer extends AbstractPlayer implements Player.Listener {
     @Override
     public void onPlayerError(PlaybackException error) {
         Log.e("Tvbox-runtime", "echo-Exo player error: " + currentPlayPath, error);
-        if (retryAsHls(error)) {
+        if (retryAsProgressive(error) || retryAsHls(error)) {
             return;
         }
         if (mPlayerEventListener != null) {
             mPlayerEventListener.onError();
         }
+    }
+
+    /**
+     * Retries a manifest address as a plain stream.
+     *
+     * <p>Mirrors {@link #retryAsHls}: the address claims HLS, the server redirects to something
+     * else, the HLS parser rejects the body and the channel appears broken. A progressive source
+     * is the only other thing such a server can be serving.
+     */
+    private boolean retryAsProgressive(PlaybackException error) {
+        if (mRetriedAsProgressive || mInternalPlayer == null || currentPlayPath == null) {
+            return false;
+        }
+        if (!isParsingError(error) || !isHlsPath(currentPlayPath)) {
+            return false;
+        }
+        mRetriedAsProgressive = true;
+        Log.i("Tvbox-runtime", "echo-Exo retry as progressive: " + currentPlayPath);
+        mMediaSource = mMediaSourceHelper.getMediaSource(currentPlayPath,
+                copyHeaders(currentHeaders));
+        mIsPreparing = true;
+        mInternalPlayer.setMediaSource(mMediaSource);
+        mInternalPlayer.prepare();
+        mInternalPlayer.setPlayWhenReady(true);
+        return true;
+    }
+
+    private static boolean isHlsPath(String path) {
+        if (path == null) {
+            return false;
+        }
+        String lower = path.toLowerCase(java.util.Locale.US);
+        return lower.contains(".m3u8") || lower.contains("type=hls") || lower.contains("format=hls");
     }
 
     private boolean retryAsHls(PlaybackException error) {
